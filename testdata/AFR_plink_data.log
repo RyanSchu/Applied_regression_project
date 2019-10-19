@@ -1,0 +1,28 @@
+PLINK v1.90b4.3 64-bit (9 May 2017)
+Options in effect:
+  --make-bed
+  --out AFR_plink_data
+  --recode
+  --vcf AFR_for_plink.vcf
+
+Hostname: hsdbc1.luc.edu
+Working directory: /data/rschubert1/1000G
+Start time: Sat Sep 14 10:36:14 2019
+
+Random number seed: 1568475374
+128759 MB RAM detected; reserving 64379 MB for main workspace.
+--vcf: AFR_plink_data-temporary.bed + AFR_plink_data-temporary.bim +
+AFR_plink_data-temporary.fam written.
+170949 variants loaded from .bim file.
+661 people (0 males, 0 females, 661 ambiguous) loaded from .fam.
+Ambiguous sex IDs written to AFR_plink_data.nosex .
+Using 1 thread (no multithreaded calculations invoked).
+Before main variant filters, 661 founders and 0 nonfounders present.
+Calculating allele frequencies... done.
+170949 variants and 661 people pass filters and QC.
+Note: No phenotypes present.
+--make-bed to AFR_plink_data.bed + AFR_plink_data.bim + AFR_plink_data.fam ...
+done.
+--recode ped to AFR_plink_data.ped + AFR_plink_data.map ... done.
+
+End time: Sat Sep 14 10:36:20 2019
