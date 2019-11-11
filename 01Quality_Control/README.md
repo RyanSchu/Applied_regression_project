@@ -1,4 +1,6 @@
 # gwasqc_pipeline
+Quality Control Pipeline. Code orignially writtin by L Mogil and A Andeleon, automated by R Schubert.
+
 a quality control pipeline for gwas data. This pipeline was constructed to be run from the command line using linux. Please see the project wiki for full description of options and requirements.
 
 For an explanation of why we perform these steps please read the uploaded paper. In addition please find a brief walkthrough example  [here](https://gist.github.com/RyanSchu/e3cec063b00508d25f7915bcd210f7dc)
