@@ -1,0 +1,5 @@
+#!/bin/bash
+
+Rscript normalize_expression.R -e /home/rschubert1/data/GEU/MEQTL/ALL/focused_expression.txt \
+-t ALL_focused_expression \
+-o /home/rschubert1/data/GEU/MEQTL/ALL/

@@ -1,0 +1,153 @@
+#!/bin/bash
+
+PlinkPath=~/scratch/software/plink_bin/
+
+AutosomeDefault=False
+BfileDefault=/home/wheelerlab2/Data/MESA_dbGaP_55081/phg000071.v2.NHLBI_SHARE_MESA.genotype-calls-matrixfmt.c1/SHARE_MESA_c1
+GenotypingThresholdDefault=0.01
+HWEpvalDefault=0.0001
+MafDefault=0.05
+OutputDirDefault=~/QC
+PrefilterDefault=none
+
+while :
+do
+    case "$1" in
+      -a | --autosome) #flag for initial filtering by autosome
+	        Autosome=True
+	        shift 1
+	        ;;
+      -b | --bfile) #same as normal plink - Path to all files and the shared prefix
+	        BFile="$2"  
+	        shift 2
+	        ;;
+      --bim) #/path/to/file.bim
+        	  BimFile="$2"
+	        shift 2
+	        ;;
+      --bed) #/path/to/file.bed
+      	  	BedFile="$2"
+	        shift 2
+	        ;;
+      --fam) #/path/to/file.fam
+      	 	FamFile="$2"
+	        shift 2
+	        ;;
+      -k | --keep) #list of individuals you would like to keep. mutually exclusive with remove
+      	  	KeepList="$2"
+	        Prefilter=keep
+		shift 2
+	        ;;
+      -g | --geno) #threshold to filter genotyping rate by
+      	  	GenotypingThreshold="$2"
+	        shift 2
+	        ;;
+      -h | --hwe) #threshold for filtering by hardy weinburg statistics
+      	  	HWEpval="$2"
+	        shift 2
+	        ;;
+      --maf) #minor allele frequency threshold
+         	Maf="$2"
+	        shift 2
+		;;
+      -o | --output) #directory where you'd like to send all your QC folders - will be folder hierarchy
+          	OutputDir="$2"
+	        shift 2
+	        ;;
+      -r | --remove) #list of individuals you would like to remove
+      	  	RemoveList="$2"
+		Prefilter=remove
+	        shift 2
+	        ;;
+      -*) #unknown 
+      		echo "Error: Unknown option: $1" >&2
+	        exit 1
+	        ;;
+      *)  # No more options
+         	shift
+	        break
+	        ;;
+     esac
+done
+
+echo "Using bim file ${BimFile:=${BFile:=$BfileDefault}.bim}"
+echo "Using bed file ${BedFile:=${BFile:=$BfileDefault}.bed}"
+echo "Using fam file ${FamFile:=${BFile:=$BfileDefault}.fam}"
+
+if [ ! -e "${BimFile}" ] || [ ! -e "${FamFile}" ] || [ ! -e "${BedFile}" ]
+then
+  echo "Warning: One or more files does not exist. Exiting."
+  exit 1
+fi
+
+if [ ! -d "${OutputDir:=$OutputDirDefault}" ]
+then
+  mkdir "${OutputDir}"
+fi
+if [ ! -d "${OutputDir}"/plots_stats ]
+then
+  mkdir "${OutputDir}"/plots_stats
+fi
+if [ ! -d "${OutputDir}"/missingness_hwe_steps ]
+then
+  mkdir "${OutputDir}"/missingness_hwe_steps
+fi
+
+#0 Optional prefiltering step for sample selection and for autosomal filtering
+case "${Autosome:=$AutosomeDefault}:${Prefilter:=$PrefilterDefault}" in
+	True:keep)
+		"${PlinkPath}"/plink --bed "${BedFile}" --bim "${BimFile}" --fam "${FamFile}" --keep "${KeepList}" --autosome --make-bed --out "${OutputDir}"/missingness_hwe_steps/00autosome_k
+		BedFile="${OutputDir}"/missingness_hwe_steps/00autosome_k.bed
+		BimFile="${OutputDir}"/missingness_hwe_steps/00autosome_k.bim
+		FamFile="${OutputDir}"/missingness_hwe_steps/00autosome_k.fam
+		;;
+	True:remove)
+		"${PlinkPath}"/plink --bed "${BedFile}" --bim "${BimFile}" --fam "${FamFile}" --remove "${RemoveList}" --autosome --make-bed --out "${OutputDir}"/missingness_hwe_steps/00autosome_r
+		BedFile="${OutputDir}"/missingness_hwe_steps/00autosome_r.bed
+		BimFile="${OutputDir}"/missingness_hwe_steps/00autosome_r.bim
+		FamFile="${OutputDir}"/missingness_hwe_steps/00autosome_r.fam
+		;;
+	True:none)
+		"${PlinkPath}"/plink --bed "${BedFile}" --bim "${BimFile}" --fam "${FamFile}" --autosome --make-bed --out "${OutputDir}"/missingness_hwe_steps/00autosome
+		BedFile="${OutputDir}"/missingness_hwe_steps/00autosome.bed
+		BimFile="${OutputDir}"/missingness_hwe_steps/00autosome.bim
+		FamFile="${OutputDir}"/missingness_hwe_steps/00autosome.fam
+		;;
+	False:keep)
+		"${PlinkPath}"/plink --bed "${BedFile}" --bim "${BimFile}" --fam "${FamFile}" --keep "${KeepList}" --make-bed --out "${OutputDir}"/missingness_hwe_steps/00filt_k
+		BedFile="${OutputDir}"/missingness_hwe_steps/00filt_k.bed
+		BimFile="${OutputDir}"/missingness_hwe_steps/00filt_k.bim
+		FamFile="${OutputDir}"/missingness_hwe_steps/00filt_k.fam
+		;;
+	False:remove)
+		"${PlinkPath}"/plink --bed "${BedFile}" --bim "${BimFile}" --fam "${FamFile}" --remove "${RemoveList}" --make-bed --out "${OutputDir}"/missingness_hwe_steps/00filt_r
+		BedFile="${OutputDir}"/missingness_hwe_steps/00filt_r.bed
+		BimFile="${OutputDir}"/missingness_hwe_steps/00filt_r.bim
+		FamFile="${OutputDir}"/missingness_hwe_steps/00filt_r.fam
+		;;
+esac
+
+#1 for determining genotyping threshold
+"${PlinkPath}"/plink --bed "${BedFile}" --bim "${BimFile}" --fam "${FamFile}" --missing --out "${OutputDir}"/missingness_hwe_steps/01initial_missingness
+#call rate distribution check
+#2 fitlers out based on genotyping threshold
+"${PlinkPath}"/plink --bed "${BedFile}" --bim "${BimFile}" --fam "${FamFile}" --geno "${GenotypingThreshold:=$GenotypingThresholdDefault}" --maf "${Maf:=$MafDefault}" --make-bed --out "${OutputDir}"/missingness_hwe_steps/"02geno_${GenotypingThreshold}_maf_${Maf}_filtered"
+#3 For validation of missingness threshold and call rate distribution check
+"${PlinkPath}"/plink --bfile "${OutputDir}"/missingness_hwe_steps/"02geno_${GenotypingThreshold}_maf_${Maf}_filtered" --missing --out "${OutputDir}"/missingness_hwe_steps/03missingness_validation
+#call rate distribution validation
+
+Rscript /home/rschubert1/scratch/software/gwasqc_pipeline/Rscripts/CallRateDistribution.R -t "${GenotypingThreshold}" --QCdir "${OutputDir}"
+
+#4 for later calculating HWE statistics
+"${PlinkPath}"/plink --bfile "${OutputDir}"/missingness_hwe_steps/"02geno_${GenotypingThreshold}_maf_${Maf}_filtered" --hardy --out "${OutputDir}"/missingness_hwe_steps/04initial_HWE_stats
+#calculate HWE statistics prefiltering
+Rscript /home/rschubert1/scratch/software/gwasqc_pipeline/Rscripts/hwe.R --hwe "${OutputDir}"/missingness_hwe_steps/04initial_HWE_stats.hwe -o "${OutputDir}"/plots_stats/ -t initial
+
+#5 Filter by HWE threshold and recalculate staistics
+"${PlinkPath}"/plink --bfile "${OutputDir}"/missingness_hwe_steps/"02geno_${GenotypingThreshold}_maf_${Maf}_filtered"  --hwe "${HWEpval:=$HWEpvalDefault}" midp --make-bed --out "${OutputDir}"/missingness_hwe_steps/05filtered_HWE
+"${PlinkPath}"/plink --bfile "${OutputDir}"/missingness_hwe_steps/05filtered_HWE --hardy --out "${OutputDir}"/missingness_hwe_steps/05filtered_HWE
+
+Rscript /home/rschubert1/scratch/software/gwasqc_pipeline/Rscripts/hwe.R --hwe "${OutputDir}"/missingness_hwe_steps/05filtered_HWE.hwe -o "${OutputDir}"/plots_stats/ -t filtered
+
+
+

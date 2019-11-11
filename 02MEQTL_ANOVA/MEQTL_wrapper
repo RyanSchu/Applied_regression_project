@@ -1,0 +1,14 @@
+#!/bin/bash
+#$ -S /bin/bash
+#$ -pe mpi 1
+
+
+Rscript /home/rschubert1/scratch/software/QTPipe/eQTL/03MatrixEQTL.R \
+--snpgenotype /home/rschubert1/data/GEU/MEQTL/ALL/chr${chr}.genoype.txt  \
+--snplocation /home/rschubert1/data/GEU/MEQTL/snp_locations/chr.${chr}.snp.loc.txt \
+--geneexpression /home/rschubert1/data/GEU/MEQTL/ALL/chr${chr}.gene_expression.txt \
+--genelocation /home/rschubert1/data/GEU/MEQTL/gene_locations/chr${chr}.protein_coding_list \
+--tag ALL.chr${chr} \
+-o /home/rschubert1/data/GEU/MEQTL/ALL/results/ \
+--cis 1 \
+--trans 0

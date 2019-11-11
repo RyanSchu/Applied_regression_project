@@ -1,0 +1,131 @@
+---
+title: "Untitled"
+author: "Brian Dehlinger"
+date: "November 5, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r Exploratory Y BoxPlot}
+DataX <- read.table("C:\\Users\\Brian\\item\\raw.txt", header=TRUE, sep=',')
+X <- DataX$rs11080327
+Y <- DataX$ENSG00000166750
+boxplot(Y, ylab="Gene Expresssion", main="SLFN5 Expession Data")
+#There's a few outlying gene expression values. These are physically understood and of interest so in the final model we plan to retain them.
+```
+
+
+
+```{r Exploratory Y Histogram, Normality Assumption}
+hist(Y, ylab="Gene Expresssion", main="SLFN5 Expession Data", xlab="SLFN5")
+#The Expression response target variable appears to be normally distributed if we don't consider outlying values. There also appears to be a linear relationship just by looking at the graph of Expression vs rs11080327 level. 
+```
+```{r Exploratory Y vs X}
+plot(Y~X, ylab="Gene Expresssion", xlab='rs11080327 level', main="SLFN5 vs rs11080327 factor")
+```
+
+
+```{r Base Linear Regression Model}
+model <- lm(Y~X)
+summary(model)
+table <- anova(model)
+require(broom)
+require(knitr)
+out <- tidy(table)
+kable(out)
+#From a preliminary look at the untransformed model we see that about 70.68% of the variance inf SLF5N expression can be explained by the level of rs11080327
+
+#We have a model where for each unit increase in level of rs11080327(from 0 to 2) we see the mean expression of SLF5N increase by 7.0320 and the p-value is less than 2e-16 meeting signifiance at 0.001.
+
+```
+
+
+
+# Model Diagnostics
+```{r Model Diagnostics}
+boxplot(model$residuals, main="Model Residuals", ylab="Residual")
+qqnorm(model$residuals)
+qqline(model$residuals)
+library(nortest)
+library(lmtest)
+ad.test(model$residuals)
+bptest(model)
+dwtest(model)
+#We see from a normal q-q plot and the Anderson-Darling Normality Test that the residuals are slightly not normally distributed given an alpha of 0.05.
+#We also note that the Breusch-Pagan test suggests that the residual variances are not equal. We also note there may be issues with autocorrelation from the #Durbin-Watson test. However, we will do graphical diagnostics to assess these issues. 
+```
+
+
+
+```{r Model Diagnostics 2}
+plot(model, which=5)
+plot(Y)
+plot(model$residuals ~ X, main="Residuals Vs rs11080327 Level", xlab="rs11080327 level", ylab="Residual")
+#From a Residuals vs Leverage plot there do not appear to be any influential points.
+#Looking at a plot of Y vs Index suggests that there could be some autocorrelation but it is hard to say and could be due to chance.
+# Looking at plot of the residuals vs the predictor variable we see that the variances appear similar across 0, 1, and 2.
+```
+
+
+```{r Model Diagnostics 3}
+model <- lm(Y+10~X)
+library(MASS)
+bc <- boxcox(model)
+bc$x[which.max(bc$y)]
+# It appears as if we should take the square root of Y+10 from using the Box-Cox method.
+```
+
+
+
+```{r Model Diagnostics 4}
+model <- lm(sqrt(Y+10)~X)
+summary(model)
+anova(model)
+out <- tidy(model)
+kable(out)
+# We note that the R-sqaured went up to 0.7203 suggesting a slight improvement.
+```
+
+
+
+
+```{r Model Diagnostics 5}
+qqnorm(model$residuals)
+qqline(model$residuals)
+ad.test(model$residuals)
+#The normality assumption now seems to be met since the p-value is now 0.2074 given an alpha of 0.05. The Quantile-Quantile plot also looks better especially if we factor in that the outlier may be skewing the plot.
+```
+
+
+```{r Model Diagnostics 6}
+bptest(model)
+dwtest(model)
+# The Breusch-Pagan test suggests that there is no longer any issue with a lack of constant variance among the residuals given a p-value of 0.9881.
+
+# However, there could still be an issue with autocorrelation from the Durbin-Watson test.
+```
+
+
+
+
+```{r 2}
+n <- nrow(DataX)
+plot(1:n, model$residuals)
+plot(model$residuals ~ X, main="Residual of Transformed Model vs rs11080327 level", xlab="rs11080327 level")
+#The plot of the residual vs the predictors still suggests constant variance is met but now the Breusch-Pagan test also suggests that as well and we now have a more normal distribution of the residuals using a square root transform of the gene expression values. We have done quality control to remove related individuals from each the sample as described in the first paper we submitted. So we don't place to much emphasis on the Durbin-Watson test here. We may want to consider additional SNPs in the model
+#
+```
+
+
+
+```{r 4}
+DataSNP  <- read.table("C:\\Users\\Brian\\rs142686480.txt", header=TRUE, sep=',')
+X2 <- DataSNP$rs142686480
+plot(model$residuals ~ X2, main="Residuals vs rs142686480 level", xlab="rs142686480 level",  ylab = "Residuals")
+# It appears from this plot that the residuals vary differently for different levels of an unincoporated predictor suggesting the predictor should be considered in the model
+hist(X, main="SNP level Frequency", xlab="SNP level")
+```
