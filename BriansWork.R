@@ -1,3 +1,7 @@
+# The reason these are written as functions is that we would like to use this for picking the best model for any Gene down the line :). Each gene might have different assumptions, interactions,
+# and even different distributions.
+
+
 remove_singularities <- function(dataset, gene_name){
   dataset_copy <- dataset
   item <- paste(gene_name, "~.", sep="")
@@ -37,13 +41,19 @@ library(lmtest)
 library(MASS)
 library(car)
 library(reshape)
+library(plotmo)
 orchestrator <- function(gene_name, path){
   
   set.seed(123)
   # We already note there seems to be a large issue with multicolinearity as a priroi we know that SNP data tends to be highly correlated.
   # Thus we go ahead and look at some of these values first.
   
+  # Exploratory Data Analysis in R
   gene_data <- read_in_pruned_datasets_for_gene_0.8(gene_name, path)
+  gene_data <- as.data.frame(scale(gene_data))
+  hist(gene_data[[gene_name]], main=paste(gene_name, "Gene Expression Distribution", sep=""), ylab="Frequency", xlab="Gene Expression Value")
+  boxplot(gene_data[[gene_name]])
+  
   R <- cor(gene_data)
   R[R == 1] <- NA #drop perfect one's 
   R[abs(R) < 0.5] <- NA
@@ -68,20 +78,21 @@ orchestrator <- function(gene_name, path){
   naieve_model <- fit_naieve_model_for_gene_dataset(gene_data, gene_name)
 
   # We can see that the vifs for this gene are very large suggesting severe problems with multicolinearity. 
-  vifs <- vif(naieve_model)
-  vifs[order(-vifs)]
+  vifs <- car::vif(naieve_model)
+  print(vifs[order(-vifs)])
   
   # We do a Breusch-Pagan test to see if there is constant variance. We also do a plot of the residuals versus the predictors. 
   print(bptest(naieve_model))
   plot(naieve_model, which=1)
+  plot(naieve_model)
   
   # We do not anticipate any issue with autocorrelation.
   print(dwtest(naieve_model))
   
-  # We do a shaprio wilks normality test and a QQPlot to see if there is an issue with the normality assumption. There tends to be with these models. 
-  print(shapiro.test(naieve_model$residuals))
-  qqnorm(naieve_model$residuals)
-  qqline(naieve_model$residuals)
+  # We do a shaprio wilks normality test and a QQPlot to see if there is an issue with the normality assumption. 
+  print(shapiro.test(studres(naieve_model)))
+  qqnorm(studres(naieve_model))
+  qqline(studres(naieve_model))
   
   
   # We note that there is an issue with normality as indicated by a qqplot of the residuals in this model. 
@@ -97,10 +108,6 @@ orchestrator <- function(gene_name, path){
   # We also use a lambda value(equivalent to K)
   #grid <- expand.grid(k=c(2,3,4,5,6,7,8,9,10, 15,20, 25, 40), lambda=c(0, 0.001, 0.01))
   
-  # We want to center and scale the values of the dataset for Ridge with Backward selection(foba method)
-  
-  preProcValues <- preProcess(gene_data, method=c("center", "scale"))
-  
   # There doesn't appear to be an issue with unequal variance but rather there isn't enough representation of the fitted values beyond the range from 2 to 3.
   # Ideally, we would want to get a much larger sample size in a follow-up study to remedy this.
   
@@ -110,32 +117,50 @@ orchestrator <- function(gene_name, path){
   
   
   # This was extremely challenging to figure out. Multicolinearity is a nasty problem.
+  
+  
   # Basically, the model was overfit to the data. On the training data R-squared average was 0.80.
   # However on the validation dataset(80/20 split) the R-squared average was 0.2 suggesting this model probably overfits the data very easily even after backward
-  # selection. Upon further evaluation it became clear that the model itself has extreme issues with multicolinearity. 
-  # We still would like to eliminate some variables however to keep the model simpler so that it can generalize well and be added to the broader population.
-  # So we use LOOCV to get the largest amount of variance from the data into our training dataset as possible to prevent underfitting.
+  # selection. 
   
+  # Upon further evaluation it became clear that the model itself has extreme issues with multicolinearity that led to high variance in the Beta coefficients.
+  # We still would like to eliminate some variables however to keep the model simpler so that it can generalize well and be added to the broader population.
+  # Thus we wanted a mixture of sparse feature vectors and weight shrinkage to deal with multicolinearity and feature selection without having to do a separate 
+  # step. Thus, we chose ElasticNet to help the model generalize well. For being thorough, we used Caret to do 10-fold cross validation using both pure Ridge and 
+  # ElasticNet with parameter grids for both. #glmnet automatically scales the variables. 
   
   second_half <- names(gene_data[, names(gene_data) != gene_name])
   f <-  as.formula(paste(gene_name, "~", paste(second_half, collapse="+")))
-  grid <- expand.grid(alpha=c(0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1), lambda=c(0, 0.001, 0.01, 0.05, 0.1, 0.2))
-  model <- train(bquote(.(f)), data=gene_data, method="glmnet", trControl=train.control, tuneGrid = grid)
-  print(model)
-  grid <- expand.grid(lambda=c(0, 0.001, 0.01, 0.05, 0.1, 0.2))
-  model <- train(bquote(.(f)), data=gene_data, method="ridge", trControl=train.control, tuneGrid = grid)
+  print(f)
+  grid <- expand.grid(lambda=c(0, 0.001, 0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9))
+  grid2 <- expand.grid(alpha=c(0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1), lambda=c(0, 0.001, 0.01, 0.05, 0.1, 0.2, 0.3,0.4,0.5,0.6,0.7,0.8))
+  #model <- train(bquote(.(f)), data=gene_data, method="ridge", trControl=train.control, tuneGrid = grid, standardize=FALSE)
+  #model_glmnet <- train(bquote(.(f)), data=gene_data, method="glmnet", trControl=train.control, tuneGrid = grid2, standardize=FALSE)
+  #final_model_ridge <- model$finalModel
+  #final_model_glmnet <- model_glmnet$finalModel
+  #final_model <- model$finalModel
+  #ridge_mse <- model$results[which.min(model$results[, "RMSE"]), ][, "RMSE"]
+  #glmnet_mse <- model_glmnet$results[which.min(model$results[, "RMSE"]), ][, "RMSE"]
+  #if (ridge_mse < glmnet_mse){
+   # final_model <- final_model_ridge
+   # print(model)
+  #}
+  #else{
+   # final_model <- final_model_glmnet
+   # print(model_glmnet)
+  #}
+  grid3 <- expand.grid(k=c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,25,30,35), lambda=c(0, 0.001, 0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9))
+  model <- train(bquote(.(f)), data=gene_data, method="foba", trControl=train.control, tuneGrid=grid3)
   print(model)
 }
 
+# We notice a huge improvment in Cross Validated R-squared. We also note that RMSE is at a minimum with alpha = 0.7 and lambda = 0.05 considering the grid above.
+# We would also still like to notice if the assumptions of the model are met with these parameters. 
 
-orchestrator("ENSG00000068097", "D:\\Project\\ALL\\Selected\\chr17\\")
-orchestrator("ENSG00000139618", "D:\\Project\\ALL\\Selected\\chr13\\")
-orchestrator("ENSG00000142794", "D:\\Project\\ALL\\Selected\\chr1\\")
+# We will fit the final model using all of the data using glmnet and look at the assumptions.
 
-backward_selected_model_AIC <- function(full_model, gene_name){
-  model_name <- paste(gene_name, "BackwardSelectedModelAIC", sep='')
-  backward_selected_aic_model <- stepAIC(full_model, direction="backward")
-  return(backward_selected_aic_model)
-}
+
+
+
 
 
