@@ -93,8 +93,7 @@ orchestrator <- function(gene_name, path){
   print(shapiro.test(studres(naieve_model)))
   qqnorm(studres(naieve_model))
   qqline(studres(naieve_model))
-  
-  
+
   # We note that there is an issue with normality as indicated by a qqplot of the residuals in this model. 
   
 
@@ -128,28 +127,29 @@ orchestrator <- function(gene_name, path){
   # Thus we wanted a mixture of sparse feature vectors and weight shrinkage to deal with multicolinearity and feature selection without having to do a separate 
   # step. Thus, we chose ElasticNet to help the model generalize well. For being thorough, we used Caret to do 10-fold cross validation using both pure Ridge and 
   # ElasticNet with parameter grids for both. #glmnet automatically scales the variables. 
+  # Noba is greedy variable selection and Ridge! This is very useful for these types of issues.
   
   second_half <- names(gene_data[, names(gene_data) != gene_name])
-  f <-  as.formula(paste(gene_name, "~", paste(second_half, collapse="+")))
+  f <-  as.formula(paste("1/sqrt(",gene_name, "+2)", "~", paste(second_half, collapse="+")))
   print(f)
   grid <- expand.grid(lambda=c(0, 0.001, 0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9))
   grid2 <- expand.grid(alpha=c(0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1), lambda=c(0, 0.001, 0.01, 0.05, 0.1, 0.2, 0.3,0.4,0.5,0.6,0.7,0.8))
-  #model <- train(bquote(.(f)), data=gene_data, method="ridge", trControl=train.control, tuneGrid = grid, standardize=FALSE)
-  #model_glmnet <- train(bquote(.(f)), data=gene_data, method="glmnet", trControl=train.control, tuneGrid = grid2, standardize=FALSE)
-  #final_model_ridge <- model$finalModel
-  #final_model_glmnet <- model_glmnet$finalModel
-  #final_model <- model$finalModel
-  #ridge_mse <- model$results[which.min(model$results[, "RMSE"]), ][, "RMSE"]
-  #glmnet_mse <- model_glmnet$results[which.min(model$results[, "RMSE"]), ][, "RMSE"]
-  #if (ridge_mse < glmnet_mse){
-   # final_model <- final_model_ridge
-   # print(model)
-  #}
-  #else{
-   # final_model <- final_model_glmnet
-   # print(model_glmnet)
-  #}
-  grid3 <- expand.grid(k=c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,25,30,35), lambda=c(0, 0.001, 0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9))
+  model <- train(bquote(.(f)), data=gene_data, method="ridge", trControl=train.control, tuneGrid = grid, standardize=FALSE)
+  model_glmnet <- train(bquote(.(f)), data=gene_data, method="glmnet", trControl=train.control, tuneGrid = grid2, standardize=FALSE)
+  final_model_ridge <- model$finalModel
+  final_model_glmnet <- model_glmnet$finalModel
+  final_model <- model$finalModel
+  ridge_mse <- model$results[which.min(model$results[, "RMSE"]), ][, "RMSE"]
+  glmnet_mse <- model_glmnet$results[which.min(model$results[, "RMSE"]), ][, "RMSE"]
+  if (ridge_mse < glmnet_mse){
+   final_model <- final_model_ridge
+   print(model)
+  }
+  else{
+   final_model <- final_model_glmnet
+    print(model_glmnet)
+  }
+  grid3 <- expand.grid(k=c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,25,26), lambda=c(0, 0.001, 0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9))
   model <- train(bquote(.(f)), data=gene_data, method="foba", trControl=train.control, tuneGrid=grid3)
   print(model)
 }
@@ -160,7 +160,29 @@ orchestrator <- function(gene_name, path){
 # We will fit the final model using all of the data using glmnet and look at the assumptions.
 
 
+data <- read_in_pruned_datasets_for_gene_0.8("ENSG00000142794", "D:\\Project\\ALL\\Selected\\chr1\\")
+fit_naieve_model_for_gene_dataset <- function(gene_dataset, gene_name){
+  second_half <- names(gene_dataset[, names(gene_dataset) != gene_name])
+  formula_as_text <- paste(gene_name, "~.", sep="")
+  full_formula <- as.formula(formula_as_text)
+  model_name <- paste(gene_name, "Model", sep='')
+  f <-  as.formula(paste(gene_name, "~", paste(second_half, collapse="+")))
+  print(f)
+  fit <- eval(bquote(lm(.(f), data=gene_dataset)))
+  # Penalize number of parameters that do not add new information first! There's a lot of variables so this will be helpful.
+  return(fit)
+  
+}
 
+# Best model performance comes from FOBA(Adaptive Forward Backward Algorithm!:
+
+#  lambda  k   RMSE       Rsquared   MAE   
+#
+# 0.300   10  0.1407143  0.5241538  0.09770583
+
+# The algorithm is greedy and in R it is implemented and allows for a ridge lamdba coefficient to be specified. 
+# This gives us a lot of power to work through multicolinearity and yield sparse solutions. ElasticNet might also make
+# sense but it appears this performs slightly better empirically.
 
 
 
