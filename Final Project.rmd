@@ -1,3 +1,4 @@
+  
 ---
 title: "MLR"
 author: "Brian Dehlinger"
@@ -24,35 +25,34 @@ remove_singularities <- function(dataset, gene_name){
   }
   return(dataset_copy)
 }
-
 read_in_pruned_datasets_for_gene_0.8 <- function(gene_name, path){
   full_path0.8 <- paste(path, gene_name, "_for_r_0.8.txt", sep="")
   Data0.8 <- read.table(full_path0.8, header=TRUE, sep=',')
   Data0.8 <- remove_singularities(Data0.8, gene_name)
   return(Data0.8)
 }
-
+#install.packages("DAAG")
 #install.packages("caret")
-#install.packages('tidyverse')
 #install.packages("lmtest")
 #install.packages("MASS")
 #install.packages("car")
 #install.packages("reshape")
 #install.packages("plotmo")
+#install.packages("olsrr")
 library(caret)
-library(tidyverse)
 library(lmtest)
 library(MASS)
 library(car)
 library(reshape)
 library(plotmo)
+library(olsrr)
+library(DAAG)
 # We notice that the Expression Data is skewed to the right. 
-gene_data <- read_in_pruned_datasets_for_gene_0.8("ENSG00000142794", "D:\\Project\\ALL\\Selected\\chr1\\")
+gene_data <- read_in_pruned_datasets_for_gene_0.8("ENSG00000142794", "F:\\")
 gene_data <- as.data.frame(gene_data)
 print(gene_data)
 hist(gene_data[["ENSG00000142794"]], main="ENSG0000014279 Gene Expression Distribution", ylab="Frequency", xlab="Gene Expression Value")
 boxplot(gene_data[["ENSG00000142794"]])
-
 trainIndex <- createDataPartition(gene_data[["ENSG00000142794"]], p=.8, list = FALSE, times=1)
 gene_data <- gene_data[trainIndex,]
 gene_test <- gene_data[-trainIndex,]
@@ -68,29 +68,18 @@ plot(model, which=2)
 plot(model, which=3)
 plot(model, which=4)
 plot(model, which=5)
-
 # We note from the Residuals Vs Fitted Plot that there might be a slight concern with nonconstant variance but for the Breusch-Pagan test we fail to reject with an alpha of 0.05. However,
 # we notice an issue with normality from a QQPlot that suggests the data is skewed and we reject the shapiro-wilks test with an alpha of 0.05 The Scale-Location plot has a slope most likely because there isn't enough data for the fitted values beyond the 2.
 # We don't notice an issues with overly influential points in the residuals vs Leverage Plot.
-
 shapiro.test(model$residuals)
 bptest(model)
-
-
 # We have an adjusted R-squared of 0.5114. However, we note that there is severe multicolinearity and many model terms are non significant. Thus, this model is overly complex and needs to be pruned.
 # Ideally, we would like to have variable selection with a penalty term.
-
 # But first we will correct this model using BoxCox and then evaluate it on the test dataset using RMSE as an evaluator of model accuracy. We note that although RMSE may be good we would like to 
 # have a simpler model(with less predictors) and deal with multicolinearity that gives us about the same or less RMSE on the testing dataset. 
-
-
 n <- nrow(gene_data)
 p <- length(model$coefficients)
-vif(model)
-
-cd <- cooks.distance(model)
-which(cd > 4 / (n-p))
-# We want to retain everything as these are genetically interesting.
+car::vif(model)
 ```
 
 ```{r pressure, echo=FALSE}
@@ -107,14 +96,31 @@ transformed_gene_test <- gene_test
 transformed_gene_data[["ENSG00000142794"]] <- 1/(sqrt(transformed_gene_data[["ENSG00000142794"]]+2))
 transformed_gene_test[["ENSG00000142794"]] <- 1/(sqrt(transformed_gene_test[["ENSG00000142794"]]+2))
 n <- nrow(transformed_gene_data)
+boxplot(transformed_gene_data["ENSG00000142794"])
 ```
 
 ```{r refit MLR}
 model <- lm(ENSG00000142794~., data=transformed_gene_data)
+
+
+selected_p <- ols_step_backward_p(model, prem=0.01)
+selected_p_model <- selected_p$model
+selected_p$adjr
+selected_p$sbc
+
 # We choose P-values to only get significant terms in our model. This will hopefully improve the Added Variable Plots and still give a reasonable model. 
-selected <- ols_step_backward_p(model, prem=0.05)
-p <- length(selected$model$coefficients)
-model <- selected$model
+selected<- stepAIC(model, k=log(n))
+model <- selected
+p <- length(selected$coefficients)
+RSS_selected <- c(crossprod(selected$residuals))
+MSE <- RSS_selected / length(selected$residuals)
+sqrt(MSE)
+
+model <- selected_p_model
+```
+
+
+```{r Diagnostics}
 summary(model)
 plot(model, which=1)
 plot(model, which=2)
@@ -124,120 +130,134 @@ plot(model, which=5)
 shapiro.test(model$residuals)
 bptest(model)
 
-cd <- cooks.distance(model)
-which(cd > 4 / (n-p))
-
-# Drop the influential points and see effect
-transformed_gene_dropped <- model$model[-c(which(cd > 4 / (n-p))),]
-new_model <- lm(ENSG00000142794~., data=transformed_gene_dropped)
-plot(new_model, which=1)
-plot(new_model, which=2)
-plot(new_model, which=3)
-plot(new_model, which=4)
-plot(new_model, which=5)
-shapiro.test(new_model$residuals)
-bptest(new_model)
-
-# We choose to retain these points because they are physically understood to represent genetic diversity.
-
-# The added variable plots suggest a lot of the predictors do not add new information when the other predictors are included in the model.
 pdf("AddedVariablesAfterSelection.pdf")
 avPlots(model, ask=FALSE)
 dev.off()
+car::vif(model)
+car::vif(selected)
+```
 
-# We notice that all of the plots look much better. We no longer worry about nonconstant error variance and we no longer worry about a lack of normality in our error terms.
-# We will carry this transformation over to the other Models that are evaluated. 
-
-# We notice very large VIF values and we know a priori that this data tends to be highly correlated. Thus we probably want to do a ridge regression/include a penalty term.
-vif(model)
-predictions <- predict(model, transformed_gene_test)
-
-# We want to know the RMSE of the test set to get an understanding of the predictive abilities of this model.
-RMSE(predictions, transformed_gene_test[["ENSG00000142794"]])
+```{r New Coefficients, Leverage, DFBetas(Sensitivity Analysis)}
 
 
 
-# We get a RMSE of 0.04 which is pretty good and suggests that this model has the potential to generalize well already. However, we are extremely concerned about multicolinearity. We might
-# want to futher study specific SNPs for example.
+cd <- cooks.distance(model)
+which(cd > 4 / (n-p))
+transformed_gene_dropped <- model$model[-c(which(cd > 4 / (n-p))),]
+new_model <- lm(ENSG00000142794~., data=transformed_gene_dropped)
+model$coefficients 
+new_model$coefficients
+summary(model)
+summary(new_model)
 
-# If we change the way the test/train split is done(different seed) we note that the model performs similary within the range of 0.04 to 0.05 for RMSE suggesting this is probably an accurate measure # of the accuracy resulting from this kind of workflow for this gene and the combined information we can extract from the predictors.
 
-leverage_threshold <- (2*(p+1))/n
+# We note that we would like to retain these points regardless as they are interesting and represent variation in the population that can be informative in clinical situations. We opt to not use Robust Regression since the effect on the final model is not serious enough. We will separately analyze DFBetas to make sure this is the case. 
+
+
+leverage_threshold <- (3*(p))/n
 leverage_threshold
 leverage_values <- hatvalues(model)
 which(leverage_values > leverage_threshold)
 
-
-# Here we have a leverage threshold of 0.07715314. 
-# We note that we would like to retain these points regardless as they are interesting and represent variation in the population that can be informative in clinical situations.
-```
+# We choose a value of 0.11 as a threshold for outliers and print the maximum value below.
 
 
+betas <- as.data.frame(dfbetas(model))
+
+to_remove <- c()
+for(column in betas){
+  outliers <- which(abs(column) > 0.11)
+  print(max(abs(column)))
+  print(which(abs(column) == max(abs(column))))
+  print(outliers)
+  to_remove <- union(to_remove, outliers)
+}
+
+transformed_gene_dropped_betas <- model$model[-c(to_remove),]
+new_model_betas <- lm(ENSG00000142794~., data=transformed_gene_dropped_betas)
+model$coefficients 
+new_model$coefficients
+summary(model)
+summary(new_model_betas)
 
 
 
-
-# STOP HERE
-
-
-
-
-
-
-```{r pressure2, echo=TRUE}
-#install.packages("glmnet")
-set.seed(123)
-library(glmnet)
-train_target <- transformed_gene_data[["ENSG00000142794"]]
-train_predictors <- transformed_gene_data
-train_predictors["ENSG00000142794"] <- NULL
-train_predictors <- as.matrix(train_predictors)
-
-cfitmodel <- cv.glmnet(train_predictors, train_target, relax= TRUE, lambda=c(0, 0.0001, 0.0009, 0.001, 0.002, 0.003, 0.004, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.2, 0.3, 0.4))
-cfitmodel
-tmp_coeffs <- coef(cfitmodel, s = "lambda.min")
-columns <- as.character(
-                 data.frame(
-                      name = tmp_coeffs@Dimnames[[1]][tmp_coeffs@i + 1],
-                      coefficient = tmp_coeffs@x)[, 'name']
-                      )
-
-
-# Thanks to the User S. M. from the below link This is not my code https://stackoverflow.com/questions/44862009/ridge-regression-in-glmnet-in-r-calculating-vif-for-different-lambda-values-usi
-
-logistic_reduced <- as.formula(paste("ENSG00000142794 ~ ",
-                                  paste(columns[-1], collapse = " + "),
-                                  sep = ""))
-# refit logistic
-new.fit <- lm(logistic_reduced,
-              family=binomial(link='logit'), 
-              data = transformed_gene_data)
-
-# get vif. We notice there are two variables that have VIFs greater than 10. But all the other variables have VIFs less than 10 which is excellent and there are now 12 variables.
-# which is also excellent and we thus have found the variables we would like to use in the final model after we evaluate this model on the test data.
-vif(new.fit)
-```
-
-```{r Evaluation}
-test_predictors <- transformed_gene_test
-test_predictors["ENSG00000142794"] <- NULL
-test_predictors <- as.matrix(test_predictors)
-predictions <- predict(cfitmodel, test_predictors)
+predictions <- predict(model, transformed_gene_test)
+# We want to know the RMSE of the test set to get an understanding of the predictive abilities of this model.
 RMSE(predictions, transformed_gene_test[["ENSG00000142794"]])
-# THE RMSE is higher on the test data. This is probably due to slight underfitting but we want our model to have less predictors so it can generalize well to the larger population. We could decrease lambda slightly to account for this if we wanted but then we would have a more complicated model with not much increase in the performance of the model as indicated from 
+validation_model_one <- lm(ENSG00000142794~rs12734589+rs1976403+rs10737458+rs113324018+rs972662+rs41290414, data=transformed_gene_test)
+sigma(model)^2
+sigma(validation_model_one)^2
+summary(model)$adj.r.squared
+summary(validation_model_one)$adj.r.squared
+press(model)
+press(validation_model_one)
+
+#MSPR
+mean((transformed_gene_test[["ENSG00000142794"]]-predictions)^2)
+
+predictions_new_model <- predict(new_model, transformed_gene_test)
+# We want to know the RMSE of the test set to get an understanding of the predictive abilities of this model.
+RMSE(predictions_new_model, transformed_gene_test[["ENSG00000142794"]])
+ols_plot_dfbetas(model)
+validation_new_model <- lm(ENSG00000142794~rs12734589+rs1976403+rs10737458+rs113324018+rs972662+rs41290414, data=transformed_gene_test)
+sigma(validation_new_model)^2
+summary(validation_new_model)$adj.r.squared
+press(validation_new_model)
+
+#MSPR
+mean((transformed_gene_test[["ENSG00000142794"]]-predictions_new_model)^2)
+
+
+predictions_bic_selected_model <- predict(selected, transformed_gene_test)
+RMSE(predictions_bic_selected_model, transformed_gene_test[["ENSG00000142794"]])
+
+
+validation_model_two <- lm(ENSG00000142794 ~ rs12734589 + rs1976403 + rs1814737 + 
+    rs17420195 + rs10737458 + rs904927 + rs113324018 + rs972662 + 
+    rs41290414 + rs115933091, data=transformed_gene_test)
+
+sigma(selected)^2
+sigma(validation_model_two)^2
+summary(selected)$adj.r.squared
+summary(validation_model_two)$adj.r.squared
+press(selected)
+press(validation_model_two)
+mean((transformed_gene_test[["ENSG00000142794"]]-predictions_bic_selected_model)^2)
+
+vif(model)
+```
+
+```{r}
+# We get a RMSE of 0.055 which is pretty good and suggests that this model has the potential to generalize well already. However, we are extremely concerned about multicolinearity. We might
+# want to futher study specific SNPs for example.
+# If we change the way the test/train split is done(different seed) we note that the model performs similary within the range of 0.04 to 0.05 for RMSE suggesting this is probably an accurate measure # of the accuracy resulting from this kind of workflow for this gene and the combined information we can extract from the predictors.
+
+predictions_bic_selected_model <- predict(selected, transformed_gene_test)
+RMSE(predictions_bic_selected_model, transformed_gene_test[["ENSG00000142794"]])
+
+
+validation_model_two <- lm(ENSG00000142794 ~ rs12734589 + rs1976403 + rs1814737 + 
+    rs17420195 + rs10737458 + rs904927 + rs113324018 + rs972662 + 
+    rs41290414 + rs115933091, data=transformed_gene_test)
+
+sigma(selected)^2
+sigma(validation_model_two)^2
+summary(selected)$adj.r.squared
+summary(validation_model_two)$adj.r.squared
+press(selected)
+press(validation_model_two)
+mean((transformed_gene_test[["ENSG00000142794"]]-predictions_bic_selected_model)^2)
+
+# Even though this has a lower RMSE we choose the first model since it has less predictors and is more likely to generalize well to independent data and doesn't have colinearity. It can better explain what is going on in a downstream model that incoporates gene expression.
 ```
 
 
-```{r Dog}
-# We use plotres to plot the residuals (QQPlot and Residuals Vs Fitted)
 
-# We notice there isn't a trend in the Residuals vs Fitted Plot suggesting there is 
-# no issue with nonconstant error variance
-plotres(cfitmodel, which=3)
 
-# We notice there is no major issues with the Residual QQPlot.
-plotres(cfitmodel, which=4)
 
-# We notice that the MSE is optimized with a lower gamma(mixing parameter)
-plot(cfitmodel)
-```
+
+
+
+
+
