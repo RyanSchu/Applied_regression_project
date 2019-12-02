@@ -1,0 +1,204 @@
+---
+title: "MLR"
+author: "Brian Dehlinger"
+date: "December 1, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r cars, echo=FALSE}
+remove_singularities <- function(dataset, gene_name){
+  dataset_copy <- dataset
+  item <- paste(gene_name, "~.", sep="")
+  full_formula <- as.formula(item)
+  fit <- lm(full_formula, data=dataset)
+  singularities <- attributes(alias(fit)$Complete)$dimnames[[1]]
+  for (singularity in singularities){
+    dataset_copy[singularity] <- NULL
+  }
+  return(dataset_copy)
+}
+
+read_in_pruned_datasets_for_gene_0.8 <- function(gene_name, path){
+  full_path0.8 <- paste(path, gene_name, "_for_r_0.8.txt", sep="")
+  Data0.8 <- read.table(full_path0.8, header=TRUE, sep=',')
+  Data0.8 <- remove_singularities(Data0.8, gene_name)
+  return(Data0.8)
+}
+
+#install.packages("caret")
+#install.packages('tidyverse')
+#install.packages("lmtest")
+#install.packages("MASS")
+#install.packages("car")
+#install.packages("reshape")
+#install.packages("plotmo")
+library(caret)
+library(tidyverse)
+library(lmtest)
+library(MASS)
+library(car)
+library(reshape)
+library(plotmo)
+  
+```
+
+```{r setup} 
+# We notice that the Expression Data is skewed to the right. 
+model <- lm(ENSG00000142794~., data=gene_data)
+gene_data <- read_in_pruned_datasets_for_gene_0.8("ENSG00000142794", "D:\\Project\\ALL\\Selected\\chr1\\")
+gene_data <- as.data.frame(gene_data)
+print(gene_data)
+hist(gene_data[["ENSG00000142794"]], main="ENSG0000014279 Gene Expression Distribution", ylab="Frequency", xlab="Gene Expression Value")
+boxplot(gene_data[["ENSG00000142794"]])
+
+trainIndex <- createDataPartition(gene_data[["ENSG00000142794"]], p=.8, list = FALSE, times=1)
+gene_data <- gene_data[trainIndex,]
+gene_test <- gene_data[-trainIndex,]
+```
+
+
+```{r diagnostics}
+summary(model)
+plot(model, which=1)
+plot(model, which=2)
+plot(model, which=3)
+plot(model, which=4)
+plot(model, which=5)
+
+# We note from the Residuals Vs Fitted Plot that there might be a slight concern with nonconstant variance but for the Breusch-Pagan test we fail to reject with an alpha of 0.05. However,
+# we notice an issue with normality from a QQPlot that suggests the data is skewed. The Scale-Location plot has a slope most likely because there isn't enough data for the fitted values beyond the 2.
+# We don't notice an issues with overly influential points in the residuals vs Leverage Plot.
+# We 
+shapiro.test(model$residuals)
+bptest(model)
+model <- lm(ENSG00000142794~., data=gene_data)
+
+# We have an adjusted R-squared of 0.5114. However, we note that there is severe multicolinearity and many model terms are non significant. Thus, this model is overly complex and needs to be pruned.
+# Ideally, we would like to have variable selection with a penalty term.
+
+# But first we will correct this model using BoxCox and then evaluate it on the test dataset using RMSE as an evaluator of model accuracy. We note that although RMSE may be good we would like to 
+# have a simpler model(with less predictors) and deal with multicolinearity that gives us about the same or less RMSE on the testing dataset. 
+
+
+
+vif(model)
+# We note there may be a few outliers as indicated by Cook's Distance
+cd <- cooks.distance(model)
+cd[which(cd > 4 / (233))] 
+
+# Possible Outliers
+# 99, 119, 170, 171, 189, 195, 215, 266, 271, 273, 283, 287, 291
+# 306, 341, 353, 355, 360, 375
+
+# We want to retain everything as these are genetically interesting.
+```
+```{r transform_data}
+transformed_gene_data <- gene_data
+transformed_gene_test <- gene_test
+transformed_gene_data[["ENSG00000142794"]] <- 1/(sqrt(transformed_gene_data[["ENSG00000142794"]]+2))
+transformed_gene_test[["ENSG00000142794"]] <- 1/(sqrt(transformed_gene_test[["ENSG00000142794"]]+2))
+```
+
+```{r refit MLR}
+
+model <- lm(ENSG00000142794~., data=transformed_gene_data)
+summary(model)
+plot(model)
+shapiro.test(model$residuals)
+bptest(model)
+
+cd <- cooks.distance(model)
+cd[which(cd > 4 / (233))] 
+
+# We notice the same potential influential points
+# 99, 119, 166, 170, 171, 189, 195, 215, 241, 266, 271, 273, 282, 287, 309, 341, 353, 355, 360, 375
+
+
+# We notice that all of the plots look much better. We no longer worry about nonconstant error variance and we no longer worry about a lack of normality in our error terms.
+# We will carry this transformation over to the other Models that are evaluated. 
+
+# We notice very large VIF values and we know a priori that this data tends to be highly correlated. Thus we probably want to do a ridge regression/include a penalty term.
+vif(model)
+predictions <- predict(model, transformed_gene_test)
+
+# We want to know the RMSE of the test set to get an understanding of the predictive abilities of this model.
+RMSE(predictions, transformed_gene_test[["ENSG00000142794"]])
+
+# We get a RMSE of 0.005296613 which is pretty good and suggests that this model has the potential to generalize well already. However, we are extremely concerned about multicolinearity. We might
+# want to futher study specific SNPs for example.
+```
+
+
+```{r pressure, echo=FALSE}
+# The added variable plots suggest a lot of the predictors do not add new information when the other predictors are included in the model.
+pdf("AddedVariables.pdf")
+avPlots(model, ask=FALSE)
+dev.off()
+```
+
+```{r pressure2, echo=TRUE}
+#install.packages("glmnet")
+set.seed(123)
+library(glmnet)
+train_target <- transformed_gene_data[["ENSG00000142794"]]
+train_predictors <- transformed_gene_data
+train_predictors["ENSG00000142794"] <- NULL
+train_predictors <- as.matrix(train_predictors)
+
+cfitmodel <- cv.glmnet(train_predictors, train_target, relax= TRUE, lambda=c(0, 0.0001, 0.0009, 0.001, 0.002, 0.003, 0.004, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.2, 0.3, 0.4))
+cfitmodel
+tmp_coeffs <- coef(cfitmodel, s = "lambda.min")
+columns <- as.character(
+                 data.frame(
+                      name = tmp_coeffs@Dimnames[[1]][tmp_coeffs@i + 1],
+                      coefficient = tmp_coeffs@x)[, 'name']
+                      )
+
+
+# Thanks to the User S. M. from the below link This is not my code https://stackoverflow.com/questions/44862009/ridge-regression-in-glmnet-in-r-calculating-vif-for-different-lambda-values-usi
+
+logistic_reduced <- as.formula(paste("ENSG00000142794 ~ ",
+                                  paste(columns[-1], collapse = " + "),
+                                  sep = ""))
+# refit logistic
+new.fit <- lm(logistic_reduced,
+              family=binomial(link='logit'), 
+              data = transformed_gene_data)
+
+# get vif. We notice there are two variables that have VIFs greater than 10. But all the other variables have VIFs less than 10 which is excellent and there are now 12 variables.
+# which is also excellent and we thus have found the variables we would like to use in the final model after we evaluate this model on the test data.
+vif(new.fit)
+```
+
+```{r Evaluation}
+test_predictors <- transformed_gene_test
+test_predictors["ENSG00000142794"] <- NULL
+test_predictors <- as.matrix(test_predictors)
+predictions <- predict(cfitmodel, test_predictors)
+RMSE(predictions, transformed_gene_test[["ENSG00000142794"]])
+# THE RMSE is higher on the test data. This is probably due to slight underfitting but we want our model to have less predictors so it can generalize well to the larger population. We could decrease lambda slightly to account for this if we wanted but then we would have a more complicated model with not much increase in the performance of the model as indicated from 
+```
+
+## We chose to skip backward selection for OLS since there was high multicolinearity it would likely lead to highly variable selected models. We chose ElasticNet for the sparse solution it gives
+## While also providing regulariziation. A good mixture of Ridge and LASSO. We left the Y variable transformed since it was not normally distributed. 
+
+
+```{r Dog}
+# We use plotres to plot the residuals (QQPlot and Residuals Vs Fitted)
+
+# We notice there isn't a trend in the Residuals vs Fitted Plot suggesting there is 
+# no issue with nonconstant error variance
+plotres(cfitmodel, which=3)
+
+# We notice there is no major issues with the Residual QQPlot.
+plotres(cfitmodel, which=4)
+
+# We notice that the MSE is optimized with a lower gamma(mixing parameter)
+plot(cfitmodel)
+```

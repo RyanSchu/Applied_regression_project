@@ -21,8 +21,6 @@ read_in_pruned_datasets_for_gene_0.8 <- function(gene_name, path){
   return(Data0.8)
 }
 
-gene_data <- read_in_pruned_datasets_for_gene_0.8("ENSG00000068097", "D:\\Project\\ALL\\Selected\\chr17\\")
-
 
 fit_naieve_model_for_gene_dataset <- function(gene_dataset, gene_name){
   second_half <- names(gene_dataset[, names(gene_dataset) != gene_name])
@@ -35,6 +33,8 @@ fit_naieve_model_for_gene_dataset <- function(gene_dataset, gene_name){
   # Penalize number of parameters that do not add new information first! There's a lot of variables so this will be helpful.
   return(fit)
 }
+
+
 library(caret)
 library(tidyverse)
 library(lmtest)
@@ -44,22 +44,31 @@ library(reshape)
 library(plotmo)
 orchestrator <- function(gene_name, path){
   
-  set.seed(123)
+  set.seed(1242)
   # We already note there seems to be a large issue with multicolinearity as a priroi we know that SNP data tends to be highly correlated.
   # Thus we go ahead and look at some of these values first.
   
   # Exploratory Data Analysis in R
+  
+  
   gene_data <- read_in_pruned_datasets_for_gene_0.8(gene_name, path)
-  gene_data <- as.data.frame(scale(gene_data))
+  gene_data <- as.data.frame(gene_data)
   hist(gene_data[[gene_name]], main=paste(gene_name, "Gene Expression Distribution", sep=""), ylab="Frequency", xlab="Gene Expression Value")
   boxplot(gene_data[[gene_name]])
+  
+  trainIndex <- createDataPartition(gene_data[[gene_name]], p=.8, list = FALSE, times=1)
+  gene_data <- gene_data[trainIndex,]
+  gene_test <- gene_data[-trainIndex,]
+  
+  # caret::RMSE(predictions, observations)
+  # caret::R2(predictions, observations)
   
   R <- cor(gene_data)
   R[R == 1] <- NA #drop perfect one's 
   R[abs(R) < 0.5] <- NA
   R <- na.omit(melt(R)) # melt! 
-  R[order(-abs(R$value)),] # sort
-  print(R)
+  R <- R[order(-abs(R$value)),] # sort
+  #print(R)
   
   
   # For the purposes of being thorough we will go ahead and do a naieve multiple regression model and cross validate(K=10) using caret.
@@ -71,8 +80,15 @@ orchestrator <- function(gene_name, path){
   # This allows us to dynamically populate the train variable with a formula. We use bquote here to do variable substitution.
   
   f <-  as.formula(paste(gene_name, "~", paste(second_half, collapse="+")))
-  model <- train(bquote(.(f)), data=gene_data, method="lm", trControl=train.control)
-  print(model)
+  # f <-  as.formula(paste("1/sqrt(",gene_name, "+2)", "~", paste(second_half, collapse="+")))
+  grid <- expand.grid(lambda=c(0, 0.001, 0.01, 0.05, 0.1))
+  model <- train(bquote(.(f)), data=gene_data, method="ridge", trControl=train.control, tuneGrid=grid)
+  final_mlr <- model$finalModel
+
+  predictions <- caret::predict.train(model, gene_test)
+  observations <- gene_test[[gene_name]]
+  print(caret::RMSE(predictions, observations))
+
   
   # We do diagnostics here.
   naieve_model <- fit_naieve_model_for_gene_dataset(gene_data, gene_name)
@@ -94,9 +110,7 @@ orchestrator <- function(gene_name, path){
   qqnorm(studres(naieve_model))
   qqline(studres(naieve_model))
 
-  # We note that there is an issue with normality as indicated by a qqplot of the residuals in this model. 
   
-
   
   # We look at an added variable plot and note that a lot of the predictors do not add new information when other predictors are in the model as indicated by a horizontal
   # line
@@ -105,7 +119,6 @@ orchestrator <- function(gene_name, path){
 
   # We will use something called foba from the Caret package that does variable selection(number of variables specified by k)
   # We also use a lambda value(equivalent to K)
-  #grid <- expand.grid(k=c(2,3,4,5,6,7,8,9,10, 15,20, 25, 40), lambda=c(0, 0.001, 0.01))
   
   # There doesn't appear to be an issue with unequal variance but rather there isn't enough representation of the fitted values beyond the range from 2 to 3.
   # Ideally, we would want to get a much larger sample size in a follow-up study to remedy this.
@@ -129,13 +142,13 @@ orchestrator <- function(gene_name, path){
   # ElasticNet with parameter grids for both. #glmnet automatically scales the variables. 
   # Noba is greedy variable selection and Ridge! This is very useful for these types of issues.
   
-  second_half <- names(gene_data[, names(gene_data) != gene_name])
-  f <-  as.formula(paste("1/sqrt(",gene_name, "+2)", "~", paste(second_half, collapse="+")))
+  f <-  as.formula(paste(gene_name, "~", paste(second_half, collapse="+")))
+  # f <-  as.formula(paste("1/sqrt(",gene_name, "+2)", "~", paste(second_half, collapse="+")))
   print(f)
   grid <- expand.grid(lambda=c(0, 0.001, 0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9))
   grid2 <- expand.grid(alpha=c(0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1), lambda=c(0, 0.001, 0.01, 0.05, 0.1, 0.2, 0.3,0.4,0.5,0.6,0.7,0.8))
-  model <- train(bquote(.(f)), data=gene_data, method="ridge", trControl=train.control, tuneGrid = grid, standardize=FALSE)
-  model_glmnet <- train(bquote(.(f)), data=gene_data, method="glmnet", trControl=train.control, tuneGrid = grid2, standardize=FALSE)
+  model <- train(bquote(.(f)), data=gene_data, method="ridge", trControl=train.control, tuneGrid = grid, standardize=TRUE)
+  model_glmnet <- train(bquote(.(f)), data=gene_data, method="glmnet", trControl=train.control, tuneGrid = grid2, standardize=TRUE)
   final_model_ridge <- model$finalModel
   final_model_glmnet <- model_glmnet$finalModel
   final_model <- model$finalModel
@@ -144,14 +157,25 @@ orchestrator <- function(gene_name, path){
   if (ridge_mse < glmnet_mse){
    final_model <- final_model_ridge
    print(model)
+   predictions <- caret::predict.train(model, gene_test)
+   observations <- gene_test[[gene_name]]
+   print(caret::RMSE(predictions, observations))
   }
   else{
    final_model <- final_model_glmnet
-    print(model_glmnet)
+   print(model_glmnet)
+   predictions <- caret::predict.train(model_glmnet, gene_test)
+   observations <- gene_test[[gene_name]]
+   print(caret::RMSE(predictions, observations))
   }
   grid3 <- expand.grid(k=c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,25,26), lambda=c(0, 0.001, 0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9))
   model <- train(bquote(.(f)), data=gene_data, method="foba", trControl=train.control, tuneGrid=grid3)
+  selected_predictors <- (predictors(model))
+  print(selected_predictors)
   print(model)
+  predictions <- caret::predict.train(model, gene_test)
+  observations <- gene_test[[gene_name]]
+  print(caret::RMSE(predictions, observations))
 }
 
 # We notice a huge improvment in Cross Validated R-squared. We also note that RMSE is at a minimum with alpha = 0.7 and lambda = 0.05 considering the grid above.
@@ -160,29 +184,11 @@ orchestrator <- function(gene_name, path){
 # We will fit the final model using all of the data using glmnet and look at the assumptions.
 
 
-data <- read_in_pruned_datasets_for_gene_0.8("ENSG00000142794", "D:\\Project\\ALL\\Selected\\chr1\\")
-fit_naieve_model_for_gene_dataset <- function(gene_dataset, gene_name){
-  second_half <- names(gene_dataset[, names(gene_dataset) != gene_name])
-  formula_as_text <- paste(gene_name, "~.", sep="")
-  full_formula <- as.formula(formula_as_text)
-  model_name <- paste(gene_name, "Model", sep='')
-  f <-  as.formula(paste(gene_name, "~", paste(second_half, collapse="+")))
-  print(f)
-  fit <- eval(bquote(lm(.(f), data=gene_dataset)))
-  # Penalize number of parameters that do not add new information first! There's a lot of variables so this will be helpful.
-  return(fit)
-  
-}
 
-# Best model performance comes from FOBA(Adaptive Forward Backward Algorithm!:
 
-#  lambda  k   RMSE       Rsquared   MAE   
-#
-# 0.300   10  0.1407143  0.5241538  0.09770583
+# We notice that although we have simplified the model our test data indicates that the model was overfit. However, this is less overfit than a naieve MLR.
 
-# The algorithm is greedy and in R it is implemented and allows for a ridge lamdba coefficient to be specified. 
-# This gives us a lot of power to work through multicolinearity and yield sparse solutions. ElasticNet might also make
-# sense but it appears this performs slightly better empirically.
+
 
 
 
