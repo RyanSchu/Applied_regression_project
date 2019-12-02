@@ -12,6 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 ```{r cars, echo=FALSE}
+set.seed(1223)
 remove_singularities <- function(dataset, gene_name){
   dataset_copy <- dataset
   item <- paste(gene_name, "~.", sep="")
@@ -45,12 +46,7 @@ library(MASS)
 library(car)
 library(reshape)
 library(plotmo)
-  
-```
-
-```{r setup} 
 # We notice that the Expression Data is skewed to the right. 
-model <- lm(ENSG00000142794~., data=gene_data)
 gene_data <- read_in_pruned_datasets_for_gene_0.8("ENSG00000142794", "D:\\Project\\ALL\\Selected\\chr1\\")
 gene_data <- as.data.frame(gene_data)
 print(gene_data)
@@ -63,7 +59,9 @@ gene_test <- gene_data[-trainIndex,]
 ```
 
 
+
 ```{r diagnostics}
+model <- lm(ENSG00000142794~., data=gene_data)
 summary(model)
 plot(model, which=1)
 plot(model, which=2)
@@ -72,12 +70,12 @@ plot(model, which=4)
 plot(model, which=5)
 
 # We note from the Residuals Vs Fitted Plot that there might be a slight concern with nonconstant variance but for the Breusch-Pagan test we fail to reject with an alpha of 0.05. However,
-# we notice an issue with normality from a QQPlot that suggests the data is skewed. The Scale-Location plot has a slope most likely because there isn't enough data for the fitted values beyond the 2.
+# we notice an issue with normality from a QQPlot that suggests the data is skewed and we reject the shapiro-wilks test with an alpha of 0.05 The Scale-Location plot has a slope most likely because there isn't enough data for the fitted values beyond the 2.
 # We don't notice an issues with overly influential points in the residuals vs Leverage Plot.
-# We 
+
 shapiro.test(model$residuals)
 bptest(model)
-model <- lm(ENSG00000142794~., data=gene_data)
+
 
 # We have an adjusted R-squared of 0.5114. However, we note that there is severe multicolinearity and many model terms are non significant. Thus, this model is overly complex and needs to be pruned.
 # Ideally, we would like to have variable selection with a penalty term.
@@ -86,39 +84,66 @@ model <- lm(ENSG00000142794~., data=gene_data)
 # have a simpler model(with less predictors) and deal with multicolinearity that gives us about the same or less RMSE on the testing dataset. 
 
 
-
+n <- nrow(gene_data)
+p <- length(model$coefficients)
 vif(model)
-# We note there may be a few outliers as indicated by Cook's Distance
+
 cd <- cooks.distance(model)
-cd[which(cd > 4 / (233))] 
-
-# Possible Outliers
-# 99, 119, 170, 171, 189, 195, 215, 266, 271, 273, 283, 287, 291
-# 306, 341, 353, 355, 360, 375
-
+which(cd > 4 / (n-p))
 # We want to retain everything as these are genetically interesting.
 ```
+
+```{r pressure, echo=FALSE}
+# The added variable plots suggest a lot of the predictors do not add new information when the other predictors are included in the model.
+pdf("AddedVariablesBeforeSelection.pdf")
+avPlots(model, ask=FALSE)
+dev.off()
+```
+
+
 ```{r transform_data}
 transformed_gene_data <- gene_data
 transformed_gene_test <- gene_test
 transformed_gene_data[["ENSG00000142794"]] <- 1/(sqrt(transformed_gene_data[["ENSG00000142794"]]+2))
 transformed_gene_test[["ENSG00000142794"]] <- 1/(sqrt(transformed_gene_test[["ENSG00000142794"]]+2))
+n <- nrow(transformed_gene_data)
 ```
 
 ```{r refit MLR}
-
 model <- lm(ENSG00000142794~., data=transformed_gene_data)
+# We choose P-values to only get significant terms in our model. This will hopefully improve the Added Variable Plots and still give a reasonable model. 
+selected <- ols_step_backward_p(model, prem=0.05)
+p <- length(selected$model$coefficients)
+model <- selected$model
 summary(model)
-plot(model)
+plot(model, which=1)
+plot(model, which=2)
+plot(model, which=3)
+plot(model, which=4)
+plot(model, which=5)
 shapiro.test(model$residuals)
 bptest(model)
 
 cd <- cooks.distance(model)
-cd[which(cd > 4 / (233))] 
+which(cd > 4 / (n-p))
 
-# We notice the same potential influential points
-# 99, 119, 166, 170, 171, 189, 195, 215, 241, 266, 271, 273, 282, 287, 309, 341, 353, 355, 360, 375
+# Drop the influential points and see effect
+transformed_gene_dropped <- model$model[-c(which(cd > 4 / (n-p))),]
+new_model <- lm(ENSG00000142794~., data=transformed_gene_dropped)
+plot(new_model, which=1)
+plot(new_model, which=2)
+plot(new_model, which=3)
+plot(new_model, which=4)
+plot(new_model, which=5)
+shapiro.test(new_model$residuals)
+bptest(new_model)
 
+# We choose to retain these points because they are physically understood to represent genetic diversity.
+
+# The added variable plots suggest a lot of the predictors do not add new information when the other predictors are included in the model.
+pdf("AddedVariablesAfterSelection.pdf")
+avPlots(model, ask=FALSE)
+dev.off()
 
 # We notice that all of the plots look much better. We no longer worry about nonconstant error variance and we no longer worry about a lack of normality in our error terms.
 # We will carry this transformation over to the other Models that are evaluated. 
@@ -130,17 +155,34 @@ predictions <- predict(model, transformed_gene_test)
 # We want to know the RMSE of the test set to get an understanding of the predictive abilities of this model.
 RMSE(predictions, transformed_gene_test[["ENSG00000142794"]])
 
-# We get a RMSE of 0.005296613 which is pretty good and suggests that this model has the potential to generalize well already. However, we are extremely concerned about multicolinearity. We might
+
+
+# We get a RMSE of 0.04 which is pretty good and suggests that this model has the potential to generalize well already. However, we are extremely concerned about multicolinearity. We might
 # want to futher study specific SNPs for example.
+
+# If we change the way the test/train split is done(different seed) we note that the model performs similary within the range of 0.04 to 0.05 for RMSE suggesting this is probably an accurate measure # of the accuracy resulting from this kind of workflow for this gene and the combined information we can extract from the predictors.
+
+leverage_threshold <- (2*(p+1))/n
+leverage_threshold
+leverage_values <- hatvalues(model)
+which(leverage_values > leverage_threshold)
+
+
+# Here we have a leverage threshold of 0.07715314. 
+# We note that we would like to retain these points regardless as they are interesting and represent variation in the population that can be informative in clinical situations.
 ```
 
 
-```{r pressure, echo=FALSE}
-# The added variable plots suggest a lot of the predictors do not add new information when the other predictors are included in the model.
-pdf("AddedVariables.pdf")
-avPlots(model, ask=FALSE)
-dev.off()
-```
+
+
+
+
+# STOP HERE
+
+
+
+
+
 
 ```{r pressure2, echo=TRUE}
 #install.packages("glmnet")
@@ -184,9 +226,6 @@ predictions <- predict(cfitmodel, test_predictors)
 RMSE(predictions, transformed_gene_test[["ENSG00000142794"]])
 # THE RMSE is higher on the test data. This is probably due to slight underfitting but we want our model to have less predictors so it can generalize well to the larger population. We could decrease lambda slightly to account for this if we wanted but then we would have a more complicated model with not much increase in the performance of the model as indicated from 
 ```
-
-## We chose to skip backward selection for OLS since there was high multicolinearity it would likely lead to highly variable selected models. We chose ElasticNet for the sparse solution it gives
-## While also providing regulariziation. A good mixture of Ridge and LASSO. We left the Y variable transformed since it was not normally distributed. 
 
 
 ```{r Dog}
