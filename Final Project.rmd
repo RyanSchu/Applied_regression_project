@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 ```{r cars, echo=FALSE}
-set.seed(1223)
+set.seed(10035)
 remove_singularities <- function(dataset, gene_name){
   dataset_copy <- dataset
   item <- paste(gene_name, "~.", sep="")
@@ -48,14 +48,18 @@ library(plotmo)
 library(olsrr)
 library(DAAG)
 # We notice that the Expression Data is skewed to the right. 
-gene_data <- read_in_pruned_datasets_for_gene_0.8("ENSG00000142794", "F:\\")
+gene_data <- read_in_pruned_datasets_for_gene_0.8("ENSG00000142794", "D:\\Project\\GitStash\\Applied_regression_project\\")
 gene_data <- as.data.frame(gene_data)
 print(gene_data)
 hist(gene_data[["ENSG00000142794"]], main="ENSG0000014279 Gene Expression Distribution", ylab="Frequency", xlab="Gene Expression Value")
-boxplot(gene_data[["ENSG00000142794"]])
+boxplot(gene_data[["ENSG00000142794"]], main="Boxplot of ENSG0000014279 expression", ylab="Expression value", xlab="Boxplot")
 trainIndex <- createDataPartition(gene_data[["ENSG00000142794"]], p=.8, list = FALSE, times=1)
-gene_data <- gene_data[trainIndex,]
-gene_test <- gene_data[-trainIndex,]
+
+# We do test train split and explicitly create the data partition indexs because of the difference seed values produce in different R versions
+train_index <- c(1,2,4,6,8,9,11,12,13,14,15,17,18,20,21,23,24,25,26,27,28,31,32,33,34,35,36,37,38,39,42,43,44,45,46,48,50,51,53,54,56,59,60,61,62,63,65,66,67,68,69,70,72,74,75,76,77,78,79,81,83,84,85,86,87,88,91,92,93,95,96,97,98,99,102,104,106,109,110,111,113,114,115,116,117,118,119,121,122,123,124,126,127,128,130,131,133,134,135,137,138,140,141,142,143,144,145,146,147,148,149,151,152,153,154,155,158,159,160,161,162,164,165,166,168,169,170,171,172,173,174,175,176,177,178,179,180,183,184,185,186,187,188,189,190,193,194,195,196,198,200,201,202,203,204,205,206,207,208,209,210,212,213,214,215,216,217,221,222,223,224,225,226,227,228,229,231,233,234,235,236,237,238,239,241,242,244,245,246,247,249,250,251,252,253,254,255,256,257,258,259,260,261,262,264,266,267,268,269,270,272,273,274,276,277,278,279,280,281,282,283,284,287,288,289,290,292,294,295,296,297,301,302,304,305,306,308,309,310,311,312,313,315,316,317,318,319,320,321,322,324,325,326,327,328,329,330,331,332,333,334,336,337,338,340,341,342,343,344,345,346,347,348,349,350,351,352,353,354,355,356,357,358,359,360,361,362,363,364,367,368,369,370,371,372,373,374,375,376,377,378,379,380,381,383,385,386,388,389,390,391,392,394,395,396,397,399,400,402,403,405,406,407,408,409,410,411,412,413,414,415,416,417,418,419,420,421)
+gene_data <- gene_data[train_index,]
+gene_test <- gene_data[-train_index,]
+#We do a train validation split here. 
 ```
 
 
@@ -70,16 +74,22 @@ plot(model, which=4)
 plot(model, which=5)
 # We note from the Residuals Vs Fitted Plot that there might be a slight concern with nonconstant variance but for the Breusch-Pagan test we fail to reject with an alpha of 0.05. However,
 # we notice an issue with normality from a QQPlot that suggests the data is skewed and we reject the shapiro-wilks test with an alpha of 0.05 The Scale-Location plot has a slope most likely because there isn't enough data for the fitted values beyond the 2.
-# We don't notice an issues with overly influential points in the residuals vs Leverage Plot.
+# We don't notice an issues with overly influential points in the residuals vs Leverage Plot. However, we do note some points are considered to have high leverage later on. But these points are actually important to the variation we want to capture in our data.
+
 shapiro.test(model$residuals)
 bptest(model)
-# We have an adjusted R-squared of 0.5114. However, we note that there is severe multicolinearity and many model terms are non significant. Thus, this model is overly complex and needs to be pruned.
-# Ideally, we would like to have variable selection with a penalty term.
-# But first we will correct this model using BoxCox and then evaluate it on the test dataset using RMSE as an evaluator of model accuracy. We note that although RMSE may be good we would like to 
-# have a simpler model(with less predictors) and deal with multicolinearity that gives us about the same or less RMSE on the testing dataset. 
+summary(model)$adj.r.squared
+# We have an adjusted R-squared of 0.44452. 
+
 n <- nrow(gene_data)
 p <- length(model$coefficients)
+
+# There is an indication of severe multicolinearity. 
 car::vif(model)
+test <- lm(ENSG00000142794+2~., data=gene_data)
+
+# We do a Boxcox on the model and note that we should do a transformation on Y(1/sqrt(Y+2))
+boxcox(test)
 ```
 
 ```{r pressure, echo=FALSE}
@@ -91,37 +101,91 @@ dev.off()
 
 
 ```{r transform_data}
+
+# We do the transform on the train and test datasets. # We also set n.
+# Additionally, we also plot the transformed values and note they appear to be normally distributed. 
 transformed_gene_data <- gene_data
 transformed_gene_test <- gene_test
 transformed_gene_data[["ENSG00000142794"]] <- 1/(sqrt(transformed_gene_data[["ENSG00000142794"]]+2))
 transformed_gene_test[["ENSG00000142794"]] <- 1/(sqrt(transformed_gene_test[["ENSG00000142794"]]+2))
 n <- nrow(transformed_gene_data)
-boxplot(transformed_gene_data["ENSG00000142794"])
+boxplot(transformed_gene_data["ENSG00000142794"], main="Boxplot of Transformed Gene Expression Values", ylab="Gene Expression Transformed Value", xlab="Boxplot")
+
+hist(transformed_gene_data[["ENSG00000142794"]], main="transformed ENSG0000014279 Gene Expression Distribution(1/sqrt(ENSG0000014279+2)", ylab="Frequency", xlab="Transformed Gene Expression Value")
+
 ```
 
 ```{r refit MLR}
-model <- lm(ENSG00000142794~., data=transformed_gene_data)
+
+# We do variable selection and we do a strict variable selection with a p-value of 0.01. Step-Forward BIC, and Step-Backward BIC.
+# We then put the selected variables for each model together and do a best subset exhaustive search over just these variables. 
+
+naieve_model <- lm(ENSG00000142794~., data=transformed_gene_data)
+naieve_model_empty <- lm(ENSG00000142794~1, data=transformed_gene_data)
 
 
-selected_p <- ols_step_backward_p(model, prem=0.01)
+selected_p <- ols_step_backward_p(naieve_model, prem=0.01)
 selected_p_model <- selected_p$model
-selected_p$adjr
-selected_p$sbc
+p <- length(selected_p_model$coefficients)
+RSS_selected <- c(crossprod(selected_p_model$residuals))
+MSE <- RSS_selected / length(selected_p_model$residuals)
+selected_p_stats <- rbind(sqrt(MSE), BIC(selected_p_model), summary(selected_p_model)$adj.r.squared, DAAG::press(selected_p_model))
 
-# We choose P-values to only get significant terms in our model. This will hopefully improve the Added Variable Plots and still give a reasonable model. 
-selected<- stepAIC(model, k=log(n))
-model <- selected
+
+
+
+selected<- stepAIC(naieve_model, k=log(n))
 p <- length(selected$coefficients)
 RSS_selected <- c(crossprod(selected$residuals))
 MSE <- RSS_selected / length(selected$residuals)
-sqrt(MSE)
+selected_stats <- rbind(sqrt(MSE), BIC(selected), summary(selected)$adj.r.squared, DAAG::press(selected))
 
-model <- selected_p_model
+forward_bic <- stepAIC(naieve_model_empty, scope = list(upper=naieve_model, lower=naieve_model_empty), direction="forward", k=log(n))
+p <- length(forward_bic$coefficients)
+RSS_selected <- c(crossprod(selected$residuals))
+MSE <- RSS_selected / length(selected$residuals)
+forward_bic_stats <- rbind(sqrt(MSE), BIC(forward_bic), summary(forward_bic)$adj.r.squared, DAAG::press(forward_bic))
+
+
+
+
+```
+
+```{r stats Selection}
+cbind(selected_p_stats,selected_stats,forward_bic_stats)
+car::vif(selected)
+car::vif(selected_p_model)
+car::vif(forward_bic)
+
+# We now do not see any issues with multicolinearity which suggests we do not need to use ridge regression on these reduced variable models.
+```
+
+```{r selection}
+search_full_model <- lm(ENSG00000142794~rs12734589 + rs1976403 + rs4654753 + rs6694671 + rs113548640 + rs10916989 + rs1566524, rs35836191 + rs60803995 + rs10799692, data=transformed_gene_data)
+
+all_possible <- ols_step_best_subset(search_full_model)
+all_possible
+
+final_stats <- cbind(selected_p_stats,selected_stats,forward_bic_stats)
+row.names(final_stats) <- c("RMSE", "BIC", "ADJ-R-Squared", "PRESS")
+colnames(final_stats) <- c("BackwardSelected_By_P_0.01", "Backward_BIC", "ForwardBIC")
+final_stats
+
+# We note that the optimal model is the one selected by forward_bic if we consider all the variables all these models give us and their best possible subsets. We try to minimize SBC(BIC) and keep a reasonable Adj-R-Squared(>0.55) and MSE. We note that MSE is near minmal at 4 predictors. But we have a lower SBC with 6 predictors and a slightly higher R-squared.
+model <- forward_bic
 ```
 
 
+
 ```{r Diagnostics}
+
+# We redo the model diagnostics from the beginning on the selected model. We will then compare this to one of the other models in our testing.
 summary(model)
+# All variables appear significant
+
+# We notice potential outliers in the Cook's Distance Plot and Residuals vs Leverage Plot so we will do further analysis on these points.
+
+# Particulary points 283, 309, and 317 have a high cook's distance.
 plot(model, which=1)
 plot(model, which=2)
 plot(model, which=3)
@@ -130,37 +194,33 @@ plot(model, which=5)
 shapiro.test(model$residuals)
 bptest(model)
 
+# We notice a small issue with normality still but this can probably be ignored. There is no issue with non constant error variance which is more important.
+
+# The added variable plots look much better. 
+
 pdf("AddedVariablesAfterSelection.pdf")
 avPlots(model, ask=FALSE)
 dev.off()
-car::vif(model)
-car::vif(selected)
+
+# All variables appear significant
+anova(model)
 ```
+
 
 ```{r New Coefficients, Leverage, DFBetas(Sensitivity Analysis)}
 
-
-
 cd <- cooks.distance(model)
-which(cd > 4 / (n-p))
 transformed_gene_dropped <- model$model[-c(which(cd > 4 / (n-p))),]
-new_model <- lm(ENSG00000142794~., data=transformed_gene_dropped)
-model$coefficients 
-new_model$coefficients
-summary(model)
-summary(new_model)
+cooks_distance_model <- lm(ENSG00000142794~., data=transformed_gene_dropped)
 
 
 # We note that we would like to retain these points regardless as they are interesting and represent variation in the population that can be informative in clinical situations. We opt to not use Robust Regression since the effect on the final model is not serious enough. We will separately analyze DFBetas to make sure this is the case. 
 
 
 leverage_threshold <- (3*(p))/n
-leverage_threshold
 leverage_values <- hatvalues(model)
-which(leverage_values > leverage_threshold)
-
-# We choose a value of 0.11 as a threshold for outliers and print the maximum value below.
-
+transformed_gene_dropped_leverage <- model$model[-c(which(leverage_values > leverage_threshold)),]
+leverage_model <- lm(ENSG00000142794~., data=transformed_gene_dropped_leverage)
 
 betas <- as.data.frame(dfbetas(model))
 
@@ -169,88 +229,88 @@ for(column in betas){
   outliers <- which(abs(column) > 0.11)
   print(max(abs(column)))
   print(which(abs(column) == max(abs(column))))
-  print(outliers)
   to_remove <- union(to_remove, outliers)
 }
 
+# One of 238, 245, and 221 give the max DFBetas the coefficients. These are the greatest outliers for DFBetas
 transformed_gene_dropped_betas <- model$model[-c(to_remove),]
 new_model_betas <- lm(ENSG00000142794~., data=transformed_gene_dropped_betas)
-model$coefficients 
-new_model$coefficients
-summary(model)
-summary(new_model_betas)
+coefficients <- rbind(model$coefficients ,new_model$coefficients,new_model_betas$coefficients, leverage_model$coefficients)
+row.names(coefficients) <- c("Normal Model", "DroppedHighDFBetas", "DroppedHighCooks", "DroppedHighLeverage")
+```
 
+```{r Summary Of Models Without Influential Points/Outliers}
 
+# We make a summary table that shows what happens when we drop high DFBetas, highCooks, and High Leverage Points from the model.
+model_data <- c()
+add_to_coefficients_data <- function(model, model_data){
+  current_model <- model
+  RSS_selected <- c(crossprod(current_model$residuals))
+  MSE <- RSS_selected / length(current_model$residuals)
+  current_model_stats <- cbind(sqrt(MSE), BIC(current_model), summary(current_model)$adj.r.squared, DAAG::press(current_model))
+  colnames(current_model_stats) <- c("RMSE", "BIC", "ADJ-R-Squared", "PRESS")
+  model_data <- rbind(model_data, current_model_stats)
+  return(model_data)
+}
+model_data <- add_to_coefficients_data(model, model_data)
+model_data <- add_to_coefficients_data(cooks_distance_model, model_data)
+model_data <- add_to_coefficients_data(new_model_betas, model_data)
+model_data <- add_to_coefficients_data(leverage_model, model_data)
 
+# Here is the summary table
+summary_of_excluding_points <- cbind(coefficients, model_data)
+summary_of_excluding_points
+
+# We only would consider dropping HighDF Betas since dropping the other elements hurts BIC. We choose not to drop the points. The coefficients are not changed greatly enough to warrant us
+# to exclude so many points that contain valuable variation from the overall population.
+```
+
+```{r Continued}
+
+# We get RMSE, MSPR, 
 predictions <- predict(model, transformed_gene_test)
 # We want to know the RMSE of the test set to get an understanding of the predictive abilities of this model.
 RMSE(predictions, transformed_gene_test[["ENSG00000142794"]])
-validation_model_one <- lm(ENSG00000142794~rs12734589+rs1976403+rs10737458+rs113324018+rs972662+rs41290414, data=transformed_gene_test)
+validation_model_one <- lm(formula(model), data=transformed_gene_test)
 sigma(model)^2
 sigma(validation_model_one)^2
 summary(model)$adj.r.squared
 summary(validation_model_one)$adj.r.squared
-press(model)
-press(validation_model_one)
-
-#MSPR
-mean((transformed_gene_test[["ENSG00000142794"]]-predictions)^2)
-
-predictions_new_model <- predict(new_model, transformed_gene_test)
-# We want to know the RMSE of the test set to get an understanding of the predictive abilities of this model.
-RMSE(predictions_new_model, transformed_gene_test[["ENSG00000142794"]])
-ols_plot_dfbetas(model)
-validation_new_model <- lm(ENSG00000142794~rs12734589+rs1976403+rs10737458+rs113324018+rs972662+rs41290414, data=transformed_gene_test)
-sigma(validation_new_model)^2
-summary(validation_new_model)$adj.r.squared
-press(validation_new_model)
-
-#MSPR
-mean((transformed_gene_test[["ENSG00000142794"]]-predictions_new_model)^2)
+DAAG::press(model)
+DAAG::press(validation_model_one)
 
 
-predictions_bic_selected_model <- predict(selected, transformed_gene_test)
-RMSE(predictions_bic_selected_model, transformed_gene_test[["ENSG00000142794"]])
+# Comparison of Model Stats 
+model_stats <- cbind(sigma(model)^2, summary(model)$adj.r.squared, DAAG::press(model))
+validation_model_stats <- cbind(sigma(validation_model_one)^2, summary(validation_model_one)$adj.r.squared, DAAG::press(validation_model_one))
+comparison_of_stats <- rbind(model_stats, validation_model_stats)
+colnames(comparison_of_stats) <- c("MSE", "Adj-R-Squared","PRESS")
+rownames(comparison_of_stats) <- c("Original Model", "Validation Model")
+comparison_of_stats
 
+# MSE vs MSPR
+mspr_vs_mse <- cbind(sigma(model)^2, mean((transformed_gene_test[["ENSG00000142794"]]-predictions)^2))
+colnames(mspr_vs_mse) <- c("MSE", "MSPR")
+mspr_vs_mse
 
-validation_model_two <- lm(ENSG00000142794 ~ rs12734589 + rs1976403 + rs1814737 + 
-    rs17420195 + rs10737458 + rs904927 + rs113324018 + rs972662 + 
-    rs41290414 + rs115933091, data=transformed_gene_test)
+# Fitting the Final Multiple Linear Regression Model :)
+final_gene_data <- read_in_pruned_datasets_for_gene_0.8("ENSG00000142794", "D:\\Project\\GitStash\\Applied_regression_project\\")
+transformed_final_gene_data <- final_gene_data
+transformed_final_gene_data[["ENSG00000142794"]] <- 1/(sqrt(transformed_final_gene_data[["ENSG00000142794"]]+2))
+final_model <- lm(formula(model), data=transformed_gene_data)
+summary(final_model)
+anova(final_model)
+plot(final_model, which=1)
+plot(final_model, which=2)
+plot(final_model, which=3)
+plot(final_model, which=4)
+plot(final_model, which=5)
+shapiro.test(model$residuals)
+bptest(final_model)
 
-sigma(selected)^2
-sigma(validation_model_two)^2
-summary(selected)$adj.r.squared
-summary(validation_model_two)$adj.r.squared
-press(selected)
-press(validation_model_two)
-mean((transformed_gene_test[["ENSG00000142794"]]-predictions_bic_selected_model)^2)
-
-vif(model)
+# We note the same diagnostic findings as above which is expected.
 ```
 
-```{r}
-# We get a RMSE of 0.055 which is pretty good and suggests that this model has the potential to generalize well already. However, we are extremely concerned about multicolinearity. We might
-# want to futher study specific SNPs for example.
-# If we change the way the test/train split is done(different seed) we note that the model performs similary within the range of 0.04 to 0.05 for RMSE suggesting this is probably an accurate measure # of the accuracy resulting from this kind of workflow for this gene and the combined information we can extract from the predictors.
-
-predictions_bic_selected_model <- predict(selected, transformed_gene_test)
-RMSE(predictions_bic_selected_model, transformed_gene_test[["ENSG00000142794"]])
-
-
-validation_model_two <- lm(ENSG00000142794 ~ rs12734589 + rs1976403 + rs1814737 + 
-    rs17420195 + rs10737458 + rs904927 + rs113324018 + rs972662 + 
-    rs41290414 + rs115933091, data=transformed_gene_test)
-
-sigma(selected)^2
-sigma(validation_model_two)^2
-summary(selected)$adj.r.squared
-summary(validation_model_two)$adj.r.squared
-press(selected)
-press(validation_model_two)
-mean((transformed_gene_test[["ENSG00000142794"]]-predictions_bic_selected_model)^2)
-
-# Even though this has a lower RMSE we choose the first model since it has less predictors and is more likely to generalize well to independent data and doesn't have colinearity. It can better explain what is going on in a downstream model that incoporates gene expression.
-```
 
 
 
