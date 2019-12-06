@@ -1,0 +1,425 @@
+  
+---
+title: "MLR"
+author: "Brian Dehlinger"
+date: "December 1, 2019"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r cars}
+set.seed(10035)
+remove_singularities <- function(dataset, gene_name){
+  dataset_copy <- dataset
+  item <- paste(gene_name, "~.", sep="")
+  full_formula <- as.formula(item)
+  fit <- lm(full_formula, data=dataset)
+  singularities <- attributes(alias(fit)$Complete)$dimnames[[1]]
+  for (singularity in singularities){
+    dataset_copy[singularity] <- NULL
+  }
+  return(dataset_copy)
+}
+read_in_pruned_datasets_for_gene_0.8 <- function(gene_name, path){
+  full_path0.8 <- paste(path, gene_name, "_for_r_0.8.txt", sep="")
+  Data0.8 <- read.table(full_path0.8, header=TRUE, sep=',')
+  Data0.8 <- remove_singularities(Data0.8, gene_name)
+  return(Data0.8)
+}
+#install.packages("DAAG")
+#install.packages("caret")
+#install.packages("lmtest")
+#install.packages("MASS")
+#install.packages("car")
+#install.packages("reshape")
+#install.packages("plotmo")
+#install.packages("olsrr")
+library(caret)
+library(lmtest)
+library(MASS)
+library(car)
+library(reshape)
+library(plotmo)
+library(olsrr)
+library(DAAG)
+gene_data <- read_in_pruned_datasets_for_gene_0.8("ENSG00000142794", "D:\\Project\\GitStash\\Applied_regression_project\\")
+gene_data <- as.data.frame(gene_data)
+hist(gene_data[["ENSG00000142794"]], main="ENSG0000014279 Gene Expression Distribution", ylab="Frequency", xlab="Gene Expression Value")
+boxplot(gene_data[["ENSG00000142794"]], main="Boxplot of ENSG0000014279 expression", ylab="Expression value", xlab="Boxplot")
+# We notice that the Expression Data is skewed to the right.
+trainIndex <- createDataPartition(gene_data[["ENSG00000142794"]], p=.8, list = FALSE, times=1)
+
+# We do test train split and explicitly create the data partition indexs 
+# because of the difference seed values produce in different R versions
+```
+```{r train_index, echo=FALSE}
+train_index <- c(1,2,4,6,8,9,11,12,13,14,15,17,18,20,21,23,24,25,26,27,28,31,32,33,34,35,36,37,38,39,42,43,44,45,46,48,50,51,53,54,56,59,60,61,62,63,65,66,67,68,69,70,72,74,75,76,77,78,79,81,83,84,85,86,87,88,91,92,93,95,96,97,98,99,102,104,106,109,110,111,113,114,115,116,117,118,119,121,122,123,124,126,127,128,130,131,133,134,135,137,138,140,141,142,143,144,145,146,147,148,149,151,152,153,154,155,158,159,160,161,162,164,165,166,168,169,170,171,172,173,174,175,176,177,178,179,180,183,184,185,186,187,188,189,190,193,194,195,196,198,200,201,202,203,204,205,206,207,208,209,210,212,213,214,215,216,217,221,222,223,224,225,226,227,228,229,231,233,234,235,236,237,238,239,241,242,244,245,246,247,249,250,251,252,253,254,255,256,257,258,259,260,261,262,264,266,267,268,269,270,272,273,274,276,277,278,279,280,281,282,283,284,287,288,289,290,292,294,295,296,297,301,302,304,305,306,308,309,310,311,312,313,315,316,317,318,319,320,321,322,324,325,326,327,328,329,330,331,332,333,334,336,337,338,340,341,342,343,344,345,346,347,348,349,350,351,352,353,354,355,356,357,358,359,360,361,362,363,364,367,368,369,370,371,372,373,374,375,376,377,378,379,380,381,383,385,386,388,389,390,391,392,394,395,396,397,399,400,402,403,405,406,407,408,409,410,411,412,413,414,415,416,417,418,419,420,421)
+```
+```{r split_data}
+gene_data <- gene_data[train_index,]
+gene_test <- gene_data[-train_index,]
+#We do a train validation split here. 
+```
+
+
+
+```{r diagnostics}
+model <- lm(ENSG00000142794~., data=gene_data)
+summary(model)
+
+
+plot(model, which=1)
+bptest(model)
+# We note from the Residuals Vs Fitted Plot that there 
+#might be a slight concern with nonconstant variance but for the Breusch-Pagan test 
+# we fail to reject with an alpha of 0.05.
+
+plot(model, which=2)
+shapiro.test(model$residuals)
+# However, we notice an issue with normality from a QQPlot that 
+# suggests the data is skewed and we reject the shapiro-wilks test with an alpha of 0.05
+
+plot(model, which=3)
+#The Scale-Location plot has a slope most likely because there isn't enough data for the fitted values.
+
+plot(model, which=4)
+plot(model, which=5)
+# We don't notice an issues with overly influential points in the residuals vs Leverage Plot. 
+# However, we do note some points are considered to have high leverage later on. But these points 
+# are actually important to the variation we want to capture in our data.
+
+summary(model)$adj.r.squared
+# We have an adjusted R-squared of 0.44452. 
+
+test <- model <- lm(ENSG00000142794+2~., data=gene_data)
+# We do a Boxcox on the model and note that we should do a transformation on Y(1/sqrt(Y+2))
+boxcox(test)
+
+```
+
+```{vif Naieve Model}
+
+# VIF Calculation and setting N and P 
+n <- nrow(gene_data)
+p <- length(model$coefficients)
+
+# There is an indication of severe multicolinearity. 
+car::vif(model)
+test <- lm(ENSG00000142794+2~., data=gene_data)
+```
+
+```{r pressure}
+# The added variable plots suggest a lot of the predictors do not 
+# add new information when the other predictors are included in the model.
+pdf("AddedVariablesBeforeSelection.pdf")
+avPlots(model, ask=FALSE)
+dev.off()
+```
+
+
+```{r transform_data}
+
+# We do the transform on the train and test datasets. # We also set n.
+# Additionally, we also plot the transformed values and note they appear to be normally distributed. 
+transformed_gene_data <- gene_data
+transformed_gene_test <- gene_test
+n <- nrow(transformed_gene_data)
+transformed_gene_data[["ENSG00000142794"]] <- 1/(sqrt(transformed_gene_data[["ENSG00000142794"]]+2))
+transformed_gene_test[["ENSG00000142794"]] <- 1/(sqrt(transformed_gene_test[["ENSG00000142794"]]+2))
+boxplot(transformed_gene_data["ENSG00000142794"], main="Boxplot of Transformed Gene Expression Values", ylab="Gene Expression Transformed Value", xlab="Boxplot")
+
+hist(transformed_gene_data[["ENSG00000142794"]], main="Transformed ENSG0000014279 Gene Expression Distribution", ylab="Frequency", xlab="Transformed Gene Expression Value")
+
+```
+
+```{r refit MLR, results="hide"}
+
+# We do variable selection and we do a strict variable selection with a p-value of 0.01. Step-Forward BIC, and Step-Backward BIC.
+# We then put the selected variables for each model together and do a best subset exhaustive search over just these variables. 
+
+naieve_model <- lm(ENSG00000142794~., data=transformed_gene_data)
+naieve_model_empty <- lm(ENSG00000142794~1, data=transformed_gene_data)
+
+
+selected_p <- ols_step_backward_p(naieve_model, prem=0.01)
+selected_p_model <- selected_p$model
+p <- length(selected_p_model$coefficients)
+RSS_selected <- c(crossprod(selected_p_model$residuals))
+MSE <- RSS_selected / length(selected_p_model$residuals)
+selected_p_stats <- rbind(sqrt(MSE), BIC(selected_p_model), summary(selected_p_model)$adj.r.squared, DAAG::press(selected_p_model))
+
+
+
+
+selected<- stepAIC(naieve_model, k=log(n))
+p <- length(selected$coefficients)
+RSS_selected <- c(crossprod(selected$residuals))
+MSE <- RSS_selected / length(selected$residuals)
+selected_stats <- rbind(sqrt(MSE), BIC(selected), summary(selected)$adj.r.squared, DAAG::press(selected))
+
+forward_bic <- stepAIC(naieve_model_empty, scope = list(upper=naieve_model, lower=naieve_model_empty), direction="forward", k=log(n))
+p <- length(forward_bic$coefficients)
+RSS_selected <- c(crossprod(forward_bic$residuals))
+MSE <- RSS_selected / length(forward_bic$residuals)
+forward_bic_stats <- rbind(sqrt(MSE), BIC(forward_bic), summary(forward_bic)$adj.r.squared, DAAG::press(forward_bic))
+
+
+
+
+```
+
+```{r stats Selection}
+car::vif(selected)
+car::vif(selected_p_model)
+car::vif(forward_bic)
+
+# We now do not see any issues with multicolinearity which suggests 
+# we do not need to use ridge regression on these reduced variable models.
+```
+
+```{r selection}
+search_full_model <- lm(ENSG00000142794~rs12734589 + rs1976403 + rs4654753 + rs6694671 + rs113548640 + rs10916989 + rs1566524, rs35836191 + rs60803995 + rs10799692, data=transformed_gene_data)
+
+all_possible <- ols_step_best_subset(search_full_model)
+all_possible
+
+final_stats <- cbind(selected_p_stats,selected_stats,forward_bic_stats)
+row.names(final_stats) <- c("RMSE", "BIC", "ADJ-R-Squared", "PRESS")
+colnames(final_stats) <- c("BackwardSelected_By_P_0.01", "Backward_BIC", "ForwardBIC")
+knitr::kable(final_stats)
+
+# We note that the optimal model is the one selected by forward_bic 
+# if we consider all the variables all these models give us and their best possible subsets.
+# We try to minimize SBC(BIC) and keep a reasonable Adj-R-Squared(>0.55) and MSE. 
+# We note that MSE is near minmal at 4 predictors. But we have a lower SBC with 6 predictors and a slightly higher R-squared.
+model <- forward_bic
+```
+
+
+
+```{r Diagnostics and Anova of Selected Model}
+
+# We redo the model diagnostics from the beginning on the selected model. 
+# We will then compare this to one of the other models in our testing.
+summary(model)
+# All variables appear significant
+
+
+
+
+
+# We note that the residual vs fitted plot appears to be random. 
+plot(model, which=1)
+# We notice a small issue with normality still but this can probably be ignored. 
+# There is no issue with non constant error variance which is more important.
+plot(model, which=2)
+shapiro.test(model$residuals)
+bptest(model)
+
+# We notice potential outliers in the Cook's Distance Plot and Residuals vs Leverage Plot 
+# so we will do further analysis on these points.
+# Particulary points 283, 309, and 317 have a high cook's distance and are candidate outliers.
+# The Scale Location Plot doesn't appear to have a slope which is good.
+plot(model, which=3)
+plot(model, which=4)
+plot(model, which=5)
+
+
+
+# The added variable plots look much better. 
+
+pdf("AddedVariablesAfterSelection.pdf")
+avPlots(model, ask=FALSE)
+dev.off()
+
+# All variables appear significant.
+# MSE looks very good. 
+knitr::kable(anova(model))
+```
+
+
+```{r New Coefficients, Leverage, DFBetas(Sensitivity Analysis)}
+
+# We do outlier analysis here
+
+cd <- cooks.distance(model)
+transformed_gene_dropped <- model$model[-c(which(cd > 4 / (n-p))),]
+cooks_distance_model <- lm(ENSG00000142794~., data=transformed_gene_dropped)
+
+
+# We note that we would like to retain these points regardless as they are interesting and represent variation 
+# in the population that can be informative in clinical situations. 
+# We opt to not use Robust Regression since the effect on the final model is not serious enough.
+
+
+
+leverage_threshold <- (3*(p))/n
+leverage_values <- hatvalues(model)
+transformed_gene_dropped_leverage <- model$model[-c(which(leverage_values > leverage_threshold)),]
+leverage_model <- lm(ENSG00000142794~., data=transformed_gene_dropped_leverage)
+
+betas <- as.data.frame(dfbetas(model))
+
+# We print the largest DFBeta for each parameter and the index of that DFBeta.
+to_remove <- c()
+for(column in betas){
+  outliers <- which(abs(column) > 0.11)
+  print(max(abs(column)))
+  print(which(abs(column) == max(abs(column))))
+  to_remove <- union(to_remove, outliers)
+}
+
+# One of 238, 245, and 221 give the max DFBetas the coefficients. These are the greatest outliers for DFBetas.
+transformed_gene_dropped_betas <- model$model[-c(to_remove),]
+new_model_betas <- lm(ENSG00000142794~., data=transformed_gene_dropped_betas)
+coefficients <- rbind(model$coefficients,new_model_betas$coefficients,cooks_distance_model$coefficients, leverage_model$coefficients)
+row.names(coefficients) <- c("Normal Model", "DroppedHighDFBetas", "DroppedHighCooks", "DroppedHighLeverage")
+```
+
+```{r Summary Of Models Without Influential Points/Outliers}
+
+# We make a summary table that shows what happens when we drop high DFBetas, highCooks, and High Leverage Points from the model.
+model_data <- c()
+add_to_coefficients_data <- function(model, model_data){
+  current_model <- model
+  RSS_selected <- c(crossprod(current_model$residuals))
+  MSE <- RSS_selected / length(current_model$residuals)
+  current_model_stats <- cbind(sqrt(MSE), BIC(current_model), summary(current_model)$adj.r.squared, DAAG::press(current_model), shapiro.test(model$residuals)$p.value, bptest(model)$p.value)
+  colnames(current_model_stats) <- c("RMSE", "BIC", "ADJ-R-Squared", "PRESS", "Shapiro_Wilks_Test_P_value", "Breusch-Pagan_Test_P_value")
+  model_data <- rbind(model_data, current_model_stats)
+  shapiro.test(model$residuals)
+  return(model_data)
+}
+model_data <- add_to_coefficients_data(model, model_data)
+model_data <- add_to_coefficients_data(cooks_distance_model, model_data)
+model_data <- add_to_coefficients_data(new_model_betas, model_data)
+model_data <- add_to_coefficients_data(leverage_model, model_data)
+
+# Here is the summary table
+summary_of_excluding_points <- cbind(coefficients, model_data)
+knitr::kable(summary_of_excluding_points)
+
+# We only would consider dropping HighDF Betas since dropping the other elements hurts BIC and might 
+# even cause the non constant error vairance assumption not to hold. We choose not to drop any points. 
+#The coefficients are not changed greatly enough to warrant us to exclude so many 
+# points that contain valuable variation from the overall population.
+
+# Dropping the High DFBetas points might be something we would consider if 
+# we had more data to represent the true diversity of the population but dropping 
+# these points might exclude points that include important variation.
+```
+
+```{r Continued}
+
+# We compare the validation model and original model and get MSPR and compare it to MSE.
+
+predictions <- predict(model, transformed_gene_test)
+validation_model_one <- lm(formula(model), data=transformed_gene_test)
+
+# Comparison of Model Stats 
+model_stats <- cbind(sigma(model)^2, summary(model)$adj.r.squared, DAAG::press(model))
+validation_model_stats <- cbind(sigma(validation_model_one)^2, summary(validation_model_one)$adj.r.squared, DAAG::press(validation_model_one))
+comparison_of_stats <- rbind(model_stats, validation_model_stats)
+colnames(comparison_of_stats) <- c("MSE", "Adj-R-Squared","PRESS")
+rownames(comparison_of_stats) <- c("Original Model", "Validation Model")
+comparison_of_stats
+knitr::kable(comparison_of_stats)
+
+# MSE vs MSPR
+mspr_vs_mse <- cbind(sigma(model)^2, mean((transformed_gene_test[["ENSG00000142794"]]-predictions)^2))
+colnames(mspr_vs_mse) <- c("MSE", "MSPR")
+knitr::kable(mspr_vs_mse)
+
+# Fitting the Final Multiple Linear Regression Model :)
+final_gene_data <- read_in_pruned_datasets_for_gene_0.8("ENSG00000142794", "D:\\Project\\GitStash\\Applied_regression_project\\")
+transformed_final_gene_data <- final_gene_data
+transformed_final_gene_data[["ENSG00000142794"]] <- 1/(sqrt(transformed_final_gene_data[["ENSG00000142794"]]+2))
+final_model <- lm(formula(model), data=transformed_gene_data)
+summary(final_model)
+knitr::kable(anova(final_model))
+plot(final_model, which=1)
+plot(final_model, which=2)
+plot(final_model, which=3)
+plot(final_model, which=4)
+plot(final_model, which=5)
+shapiro.test(model$residuals)
+bptest(final_model)
+# We note the same diagnostic findings as we did from the selected model. There is a slight issue with normality and some outliers. 
+```
+
+```{r Outlier Analysis Final Model}
+
+n <- nrow(transformed_final_gene_data)
+p <- length(final_model$coefficients)
+model <- final_model
+# We do outlier analysis here
+
+cd <- cooks.distance(model)
+transformed_gene_dropped <- model$model[-c(which(cd > 4 / (n-p))),]
+cooks_distance_model <- lm(ENSG00000142794~., data=transformed_gene_dropped)
+
+
+
+leverage_threshold <- (3*(p))/n
+leverage_values <- hatvalues(model)
+transformed_gene_dropped_leverage <- model$model[-c(which(leverage_values > leverage_threshold)),]
+leverage_model <- lm(ENSG00000142794~., data=transformed_gene_dropped_leverage)
+
+betas <- as.data.frame(dfbetas(model))
+
+# We print the largest DFBeta for each parameter and the index of that DFBeta.
+to_remove <- c()
+for(column in betas){
+  outliers <- which(abs(column) > 2/sqrt(n))
+  print(max(abs(column)))
+  print(which(abs(column) == max(abs(column))))
+  to_remove <- union(to_remove, outliers)
+}
+
+#238, 221, and 245 are possible massive outliers 
+transformed_gene_dropped_betas <- model$model[-c(to_remove),]
+new_model_betas <- lm(ENSG00000142794~., data=transformed_gene_dropped_betas)
+coefficients <- rbind(model$coefficients,new_model_betas$coefficients, cooks_distance_model$coefficients, leverage_model$coefficients)
+row.names(coefficients) <- c("Normal Model", "DroppedHighDFBetas", "DroppedHighCooks", "DroppedHighLeverage")
+```
+
+```{r Summary Of FINAL MODEL Without Influential Points/Outliers}
+# We make a summary table that shows what happens when we drop high DFBetas, highCooks, and High Leverage Points from the model.
+model_data <- c()
+add_to_coefficients_data <- function(model, model_data){
+  current_model <- model
+  RSS_selected <- c(crossprod(current_model$residuals))
+  MSE <- RSS_selected / length(current_model$residuals)
+  current_model_stats <- cbind(sqrt(MSE), BIC(current_model), summary(current_model)$adj.r.squared, DAAG::press(current_model), shapiro.test(model$residuals)$p.value, bptest(model)$p.value)
+  colnames(current_model_stats) <- c("RMSE", "BIC", "ADJ-R-Squared", "PRESS", "Shapiro_Wilks_Test_P_value", "Breusch-Pagan_Test_P_value")
+  model_data <- rbind(model_data, current_model_stats)
+  shapiro.test(model$residuals)
+  return(model_data)
+}
+model_data <- add_to_coefficients_data(model, model_data)
+model_data <- add_to_coefficients_data(cooks_distance_model, model_data)
+model_data <- add_to_coefficients_data(new_model_betas, model_data)
+model_data <- add_to_coefficients_data(leverage_model, model_data)
+
+# Here is the summary table
+summary_of_excluding_points <- cbind(coefficients, model_data)
+knitr::kable(summary_of_excluding_points)
+
+#We note that dropping the high DFBetas again results in a satisfied normality assumption but we choose to retain these points.
+```
+
+
+
+
+
+
+
+
