@@ -69,8 +69,6 @@ gene_test <- gene_data[-train_index,]
 #We do a train validation split here. 
 ```
 
-
-
 ```{r diagnostics}
 model <- lm(ENSG00000142794~., data=gene_data)
 summary(model)
@@ -416,7 +414,10 @@ knitr::kable(summary_of_excluding_points)
 #We note that dropping the high DFBetas again results in a satisfied normality assumption but we choose to retain these points.
 ```
 
-
+```{r Cross Validation 5 fold}
+cv.lm(model, data=transformed_final_gene_data, m=5)
+# Cross Validated MSE is 0.00312 
+```
 
 
 
