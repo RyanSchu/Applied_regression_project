@@ -4,16 +4,16 @@ title: "MLR"
 author: "Brian Dehlinger"
 date: "December 1, 2019"
 output:
-  word_document: default
-  pdf_document: default
   html_document: default
+  pdf_document: default
+  word_document: default
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-
+# Original Model Train Test Split, Boxplot
 
 ```{r cars}
 set.seed(10035)
@@ -69,8 +69,7 @@ gene_test <- gene_data[-train_index,]
 #We do a train validation split here. 
 ```
 
-
-
+# First Model Diagnostics
 ```{r diagnostics}
 model <- lm(ENSG00000142794~., data=gene_data)
 summary(model)
@@ -105,7 +104,8 @@ boxcox(test)
 
 ```
 
-```{vif Naieve Model}
+# VIFs of Original Model
+```{r vif Naieve Model}
 
 # VIF Calculation and setting N and P 
 n <- nrow(gene_data)
@@ -116,6 +116,7 @@ car::vif(model)
 test <- lm(ENSG00000142794+2~., data=gene_data)
 ```
 
+# Doing the Added Variable Plots
 ```{r pressure}
 # The added variable plots suggest a lot of the predictors do not 
 # add new information when the other predictors are included in the model.
@@ -123,8 +124,7 @@ pdf("AddedVariablesBeforeSelection.pdf")
 avPlots(model, ask=FALSE)
 dev.off()
 ```
-
-
+# Transforming the Data 
 ```{r transform_data}
 
 # We do the transform on the train and test datasets. # We also set n.
@@ -139,7 +139,7 @@ boxplot(transformed_gene_data["ENSG00000142794"], main="Boxplot of Transformed G
 hist(transformed_gene_data[["ENSG00000142794"]], main="Transformed ENSG0000014279 Gene Expression Distribution", ylab="Frequency", xlab="Transformed Gene Expression Value")
 
 ```
-
+# Model Selection Process
 ```{r refit MLR, results="hide"}
 
 # We do variable selection and we do a strict variable selection with a p-value of 0.01. Step-Forward BIC, and Step-Backward BIC.
@@ -175,7 +175,7 @@ forward_bic_stats <- rbind(sqrt(MSE), BIC(forward_bic), summary(forward_bic)$adj
 
 
 ```
-
+# VIF Stats of Selected Models
 ```{r stats Selection}
 car::vif(selected)
 car::vif(selected_p_model)
@@ -184,7 +184,7 @@ car::vif(forward_bic)
 # We now do not see any issues with multicolinearity which suggests 
 # we do not need to use ridge regression on these reduced variable models.
 ```
-
+# Selected Model Choosing
 ```{r selection}
 search_full_model <- lm(ENSG00000142794~rs12734589 + rs1976403 + rs4654753 + rs6694671 + rs113548640 + rs10916989 + rs1566524, rs35836191 + rs60803995 + rs10799692, data=transformed_gene_data)
 
@@ -203,7 +203,7 @@ knitr::kable(final_stats)
 model <- forward_bic
 ```
 
-
+# Diagnostics of Chosen Model
 
 ```{r Diagnostics and Anova of Selected Model}
 
@@ -244,7 +244,7 @@ dev.off()
 # MSE looks very good. 
 knitr::kable(anova(model))
 ```
-
+# Sensitivity Analysis
 
 ```{r New Coefficients, Leverage, DFBetas(Sensitivity Analysis)}
 
@@ -284,6 +284,7 @@ coefficients <- rbind(model$coefficients,new_model_betas$coefficients,cooks_dist
 row.names(coefficients) <- c("Normal Model", "DroppedHighDFBetas", "DroppedHighCooks", "DroppedHighLeverage")
 ```
 
+# Sensitiy Analysis Continued
 ```{r Summary Of Models Without Influential Points/Outliers}
 
 # We make a summary table that shows what happens when we drop high DFBetas, highCooks, and High Leverage Points from the model.
@@ -317,6 +318,7 @@ knitr::kable(summary_of_excluding_points)
 # these points might exclude points that include important variation.
 ```
 
+# Training the Final Model and Diagnostics of Final Model
 ```{r Continued}
 
 # We compare the validation model and original model and get MSPR and compare it to MSE.
@@ -354,7 +356,7 @@ shapiro.test(model$residuals)
 bptest(final_model)
 # We note the same diagnostic findings as we did from the selected model. There is a slight issue with normality and some outliers. 
 ```
-
+# Outlier Analysis in Final Model
 ```{r Outlier Analysis Final Model}
 
 n <- nrow(transformed_final_gene_data)
@@ -390,7 +392,7 @@ new_model_betas <- lm(ENSG00000142794~., data=transformed_gene_dropped_betas)
 coefficients <- rbind(model$coefficients,new_model_betas$coefficients, cooks_distance_model$coefficients, leverage_model$coefficients)
 row.names(coefficients) <- c("Normal Model", "DroppedHighDFBetas", "DroppedHighCooks", "DroppedHighLeverage")
 ```
-
+# Outlier Analysis Continued of Final Model
 ```{r Summary Of FINAL MODEL Without Influential Points/Outliers}
 # We make a summary table that shows what happens when we drop high DFBetas, highCooks, and High Leverage Points from the model.
 model_data <- c()
@@ -415,8 +417,11 @@ knitr::kable(summary_of_excluding_points)
 
 #We note that dropping the high DFBetas again results in a satisfied normality assumption but we choose to retain these points.
 ```
-
-
+# Cross Validation of Final Model
+```{r Cross Validation 5 fold}
+cv.lm(model, data=transformed_final_gene_data, m=5)
+# Cross Validated MSE is 0.00312 
+```
 
 
 
