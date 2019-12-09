@@ -417,10 +417,15 @@ knitr::kable(summary_of_excluding_points)
 
 #We note that dropping the high DFBetas again results in a satisfied normality assumption but we choose to retain these points.
 ```
-# Cross Validation of Final Model
+# Leave One Out Cross Validation MSE of Final Model
 ```{r Cross Validation 5 fold}
-cv.lm(model, data=transformed_final_gene_data, m=5)
-# Cross Validated MSE is 0.00312 
+p <- length(model$coefficients)
+n <- nrow(model$model)
+cv.lm(model, data=transformed_final_gene_data, m=n)
+
+
+leave_one_out_mse <- press(model)/(n-p)
+# Leave one out cross-validated MSE is 0.00262. This is excellent 
 ```
 
 
