@@ -344,7 +344,7 @@ knitr::kable(mspr_vs_mse)
 final_gene_data <- read_in_pruned_datasets_for_gene_0.8("ENSG00000142794", "D:\\Project\\GitStash\\Applied_regression_project\\")
 transformed_final_gene_data <- final_gene_data
 transformed_final_gene_data[["ENSG00000142794"]] <- 1/(sqrt(transformed_final_gene_data[["ENSG00000142794"]]+2))
-final_model <- lm(formula(model), data=transformed_gene_data)
+final_model <- lm(formula(model), data=transformed_final_gene_data)
 summary(final_model)
 knitr::kable(anova(final_model))
 plot(final_model, which=1)
@@ -352,7 +352,7 @@ plot(final_model, which=2)
 plot(final_model, which=3)
 plot(final_model, which=4)
 plot(final_model, which=5)
-shapiro.test(model$residuals)
+shapiro.test(final_model$residuals)
 bptest(final_model)
 # We note the same diagnostic findings as we did from the selected model. There is a slight issue with normality and some outliers. 
 ```
@@ -386,7 +386,7 @@ for(column in betas){
   to_remove <- union(to_remove, outliers)
 }
 
-#238, 221, and 245 are possible massive outliers 
+#300, 317, and 283, and 309 are possible massive outliers 
 transformed_gene_dropped_betas <- model$model[-c(to_remove),]
 new_model_betas <- lm(ENSG00000142794~., data=transformed_gene_dropped_betas)
 coefficients <- rbind(model$coefficients,new_model_betas$coefficients, cooks_distance_model$coefficients, leverage_model$coefficients)
@@ -426,7 +426,8 @@ cv.lm(model, data=transformed_final_gene_data, m=n, printit = FALSE)
 
 ```{r PRESS to MSE}
 leave_one_out_mse <- press(model)/(n-p)
-# Leave one out cross-validated MSE is 0.00262. This is excellent 
+leave_one_out_mse
+# Leave one out cross-validated MSE is 0.002865462 This is excellent 
 ```
 
 
